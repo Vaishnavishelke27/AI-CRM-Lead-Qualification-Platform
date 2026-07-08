@@ -1,0 +1,140 @@
+{
+  "name": "AI CRM - Main Lead Processing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-crm/lead-processing",
+        "responseMode": "responseNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{($env.CRM_API_BASE_URL || 'http://backend:8000') + '/webhooks/lead-enrichment'}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"lead_id\": $json.lead_id, \"context\": $json.context || {}}"
+      },
+      "id": "ai-enrichment",
+      "name": "AI Enrichment node",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 240],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{($env.CRM_API_BASE_URL || 'http://backend:8000') + '/webhooks/lead-score'}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"lead_id\": $json.lead.id, \"company_size\": $json.ai_result.enrichment?.company_size, \"industry\": $json.ai_result.enrichment?.industry, \"engagement_level\": $json.ai_result.engagement_level || 'medium', \"source\": $json.lead.source, \"context\": $json.ai_result}"
+      },
+      "id": "lead-scoring",
+      "name": "Lead Scoring node",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 240],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{($env.CRM_API_BASE_URL || 'http://backend:8000') + '/webhooks/generate-email'}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"lead_id\": $json.lead.id, \"purpose\": \"initial_outreach\", \"tone\": $json.lead.category === 'Hot' ? 'concise' : 'professional', \"context\": {\"score\": $json.ai_result, \"lead\": $json.lead}}"
+      },
+      "id": "email-generation",
+      "name": "Email Generation node",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 240],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{($env.CRM_API_BASE_URL || 'http://backend:8000') + '/webhooks/create-task'}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"lead_id\": $json.lead_id, \"context\": {\"next_action\": \"follow up on generated outreach email\", \"email_id\": $json.id}}"
+      },
+      "id": "task-creation",
+      "name": "Task Creation node",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 240],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{($env.CRM_API_BASE_URL || 'http://backend:8000') + '/webhooks/update-lead'}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"lead_id\": $json.task.lead_id, \"status\": \"processed\", \"ai_metadata\": {\"task_assignment\": $json.ai_result}, \"workflow_run_id\": $execution.id}"
+      },
+      "id": "crm-update",
+      "name": "CRM Update",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 240],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}"
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1440, 240]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{"node": "AI Enrichment node", "type": "main", "index": 0}]]
+    },
+    "AI Enrichment node": {
+      "main": [[{"node": "Lead Scoring node", "type": "main", "index": 0}]]
+    },
+    "Lead Scoring node": {
+      "main": [[{"node": "Email Generation node", "type": "main", "index": 0}]]
+    },
+    "Email Generation node": {
+      "main": [[{"node": "Task Creation node", "type": "main", "index": 0}]]
+    },
+    "Task Creation node": {
+      "main": [[{"node": "CRM Update", "type": "main", "index": 0}]]
+    },
+    "CRM Update": {
+      "main": [[{"node": "Respond", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "errorWorkflow": "AI CRM - Error Retry Handler"
+  },
+  "active": false,
+  "versionId": "ai-crm-main-lead-processing-v1"
+}

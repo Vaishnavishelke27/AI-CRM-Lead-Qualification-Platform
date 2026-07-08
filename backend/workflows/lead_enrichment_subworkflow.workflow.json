@@ -1,0 +1,101 @@
+{
+  "name": "AI CRM - Lead Enrichment Sub-workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "execute-trigger",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [0, 200]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.COMPANY_SCRAPE_URL + '?company=' + encodeURIComponent($json.company || '')}}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "scrape-company-data",
+      "name": "Scrape Company Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 100],
+      "continueOnFail": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.DECISION_MAKER_LOOKUP_URL + '?company=' + encodeURIComponent($json.company || '')}}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "find-decision-makers",
+      "name": "Find Decision Makers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 320],
+      "continueOnFail": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition"
+      },
+      "id": "merge-enrichment-context",
+      "name": "Merge Enrichment Context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [520, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{($env.CRM_API_BASE_URL || 'http://backend:8000') + '/webhooks/lead-enrichment'}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"lead_id\": $json.lead_id, \"context\": {\"company_data\": $json.company_data || $json, \"decision_makers\": $json.decision_makers || []}}"
+      },
+      "id": "ai-enrich-lead",
+      "name": "AI Enrich Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [780, 200],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [{"node": "Scrape Company Data", "type": "main", "index": 0}],
+        [{"node": "Find Decision Makers", "type": "main", "index": 0}]
+      ]
+    },
+    "Scrape Company Data": {
+      "main": [[{"node": "Merge Enrichment Context", "type": "main", "index": 0}]]
+    },
+    "Find Decision Makers": {
+      "main": [[{"node": "Merge Enrichment Context", "type": "main", "index": 1}]]
+    },
+    "Merge Enrichment Context": {
+      "main": [[{"node": "AI Enrich Lead", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "errorWorkflow": "AI CRM - Error Retry Handler"
+  },
+  "active": false,
+  "versionId": "ai-crm-lead-enrichment-subworkflow-v1"
+}

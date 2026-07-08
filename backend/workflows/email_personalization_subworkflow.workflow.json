@@ -1,0 +1,55 @@
+{
+  "name": "AI CRM - Email Personalization Sub-workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "execute-trigger",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [0, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $json.lead || $json; const score = lead.lead_score || 0; return [{ json: { lead_id: lead.id || $json.lead_id, purpose: score >= 75 ? 'book_demo' : 'nurture_follow_up', tone: score >= 75 ? 'concise' : 'professional', context: { lead, scoring: lead.ai_metadata?.score || {}, enrichment: lead.ai_metadata?.enrichment || {} } } }];"
+      },
+      "id": "build-email-context",
+      "name": "Build Email Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{($env.CRM_API_BASE_URL || 'http://backend:8000') + '/webhooks/generate-email'}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json}}"
+      },
+      "id": "generate-personalized-email",
+      "name": "Generate Personalized Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 200],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [[{"node": "Build Email Context", "type": "main", "index": 0}]]
+    },
+    "Build Email Context": {
+      "main": [[{"node": "Generate Personalized Email", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "errorWorkflow": "AI CRM - Error Retry Handler"
+  },
+  "active": false,
+  "versionId": "ai-crm-email-personalization-subworkflow-v1"
+}

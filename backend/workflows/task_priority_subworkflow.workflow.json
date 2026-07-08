@@ -1,0 +1,55 @@
+{
+  "name": "AI CRM - Task Priority Assignment Sub-workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "execute-trigger",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [0, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $json.lead || $json; const score = lead.lead_score || 0; const priority = score >= 75 ? 'high' : score >= 45 ? 'medium' : 'low'; const nextAction = score >= 75 ? 'call within 4 hours' : score >= 45 ? 'send follow-up within 1 day' : 'add to nurture sequence'; return [{ json: { lead_id: lead.id || $json.lead_id, priority, context: { next_action: nextAction, score, category: lead.category } } }];"
+      },
+      "id": "assign-priority",
+      "name": "Assign Priority From Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{($env.CRM_API_BASE_URL || 'http://backend:8000') + '/webhooks/create-task'}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json}}"
+      },
+      "id": "create-priority-task",
+      "name": "Create Priority Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 200],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [[{"node": "Assign Priority From Score", "type": "main", "index": 0}]]
+    },
+    "Assign Priority From Score": {
+      "main": [[{"node": "Create Priority Task", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "errorWorkflow": "AI CRM - Error Retry Handler"
+  },
+  "active": false,
+  "versionId": "ai-crm-task-priority-subworkflow-v1"
+}

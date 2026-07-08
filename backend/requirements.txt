@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+sqlalchemy>=2.0.45
+psycopg2-binary
+openai
+anthropic
+httpx
+pydantic
+email-validator
+alembic
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt==4.0.1
+python-multipart

@@ -1,0 +1,100 @@
+{
+  "name": "AI CRM - Error Retry Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [0, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const execution = $json.execution || {}; const error = $json.error || {}; const leadId = execution.data?.resultData?.runData?.['Webhook Trigger']?.[0]?.data?.main?.[0]?.[0]?.json?.lead_id || $json.lead_id; return [{ json: { lead_id: leadId, status: 'processing_failed', error: { message: error.message, stack: error.stack, workflow: $json.workflow?.name, execution_id: execution.id }, ai_metadata: { failed_workflow: $json.workflow?.name, failed_execution_id: execution.id } } }];"
+      },
+      "id": "normalize-error",
+      "name": "Normalize Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-lead-id",
+              "leftValue": "={{$json.lead_id}}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "has-lead",
+      "name": "Has Lead ID",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [480, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{($env.CRM_API_BASE_URL || 'http://backend:8000') + '/webhooks/update-lead'}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json}}"
+      },
+      "id": "write-failure-to-crm",
+      "name": "Write Failure To CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 120],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { handled: true, reason: 'No lead_id available to update CRM', original: $json } }];"
+      },
+      "id": "no-lead-fallback",
+      "name": "No Lead Fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 320]
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [[{"node": "Normalize Error", "type": "main", "index": 0}]]
+    },
+    "Normalize Error": {
+      "main": [[{"node": "Has Lead ID", "type": "main", "index": 0}]]
+    },
+    "Has Lead ID": {
+      "main": [
+        [{"node": "Write Failure To CRM", "type": "main", "index": 0}],
+        [{"node": "No Lead Fallback", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all"
+  },
+  "active": false,
+  "versionId": "ai-crm-error-retry-handler-v1"
+}
