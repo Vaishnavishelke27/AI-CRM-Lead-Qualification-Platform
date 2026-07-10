@@ -13,6 +13,7 @@ ENV/
 .ruff_cache/
 .coverage
 htmlcov/
+*.db
 
 # Node
 node_modules/

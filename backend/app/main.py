@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.config import settings
-from app.database import SessionLocal, get_db
+from app.database import SessionLocal, get_db, initialize_database
 from app.models import Email, Lead, Task, User
 from app.schemas import (
     AnalyticsResponse,
@@ -65,6 +65,8 @@ IMPORT_JOBS: dict[str, dict] = {}
 
 @app.on_event("startup")
 async def start_reporting_scheduler():
+    initialize_database()
+
     async def scheduled_report_loop():
         while True:
             await asyncio.sleep(max(1, app.state.reporting_interval_seconds))

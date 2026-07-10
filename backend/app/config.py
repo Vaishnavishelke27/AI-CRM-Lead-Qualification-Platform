@@ -4,7 +4,7 @@ import os
 class Settings:
     database_url: str = os.getenv(
         "DATABASE_URL",
-        "postgresql://postgres:postgres@localhost:5432/ai_crm",
+        "postgresql://postgres:postgres@127.0.0.1:5433/ai_crm",
     )
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     claude_api_key: str | None = os.getenv("CLAUDE_API_KEY")
