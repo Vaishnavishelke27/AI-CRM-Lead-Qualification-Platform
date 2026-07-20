@@ -17,6 +17,8 @@
       "parameters": {
         "method": "POST",
         "url": "={{($env.CRM_API_BASE_URL || 'http://backend:8000') + '/webhooks/lead-enrichment'}}",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-CRM-Webhook-Secret", "value": "={{$env.CRM_WEBHOOK_SECRET}}"}]},
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\"lead_id\": $json.lead_id, \"context\": $json.context || {}}"
@@ -34,6 +36,8 @@
       "parameters": {
         "method": "POST",
         "url": "={{($env.CRM_API_BASE_URL || 'http://backend:8000') + '/webhooks/lead-score'}}",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-CRM-Webhook-Secret", "value": "={{$env.CRM_WEBHOOK_SECRET}}"}]},
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\"lead_id\": $json.lead.id, \"company_size\": $json.ai_result.enrichment?.company_size, \"industry\": $json.ai_result.enrichment?.industry, \"engagement_level\": $json.ai_result.engagement_level || 'medium', \"source\": $json.lead.source, \"context\": $json.ai_result}"
@@ -51,6 +55,8 @@
       "parameters": {
         "method": "POST",
         "url": "={{($env.CRM_API_BASE_URL || 'http://backend:8000') + '/webhooks/generate-email'}}",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-CRM-Webhook-Secret", "value": "={{$env.CRM_WEBHOOK_SECRET}}"}]},
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\"lead_id\": $json.lead.id, \"purpose\": \"initial_outreach\", \"tone\": $json.lead.category === 'Hot' ? 'concise' : 'professional', \"context\": {\"score\": $json.ai_result, \"lead\": $json.lead}}"
@@ -68,6 +74,8 @@
       "parameters": {
         "method": "POST",
         "url": "={{($env.CRM_API_BASE_URL || 'http://backend:8000') + '/webhooks/create-task'}}",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-CRM-Webhook-Secret", "value": "={{$env.CRM_WEBHOOK_SECRET}}"}]},
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\"lead_id\": $json.lead_id, \"context\": {\"next_action\": \"follow up on generated outreach email\", \"email_id\": $json.id}}"
@@ -85,6 +93,8 @@
       "parameters": {
         "method": "POST",
         "url": "={{($env.CRM_API_BASE_URL || 'http://backend:8000') + '/webhooks/update-lead'}}",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-CRM-Webhook-Secret", "value": "={{$env.CRM_WEBHOOK_SECRET}}"}]},
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\"lead_id\": $json.task.lead_id, \"status\": \"processed\", \"ai_metadata\": {\"task_assignment\": $json.ai_result}, \"workflow_run_id\": $execution.id}"

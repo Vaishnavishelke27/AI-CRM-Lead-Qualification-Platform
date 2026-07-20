@@ -1,7 +1,6 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { Activity, BriefcaseBusiness, Mail, RefreshCw, UserRound } from "lucide-react";
-import { AnalyticsDashboard } from "./components/AnalyticsDashboard";
 import { AuthPanel } from "./components/AuthPanel";
 import { CRMProvider, useCRM } from "./context/CRMContext";
 import { EmailComposer } from "./components/EmailComposer";
@@ -12,8 +11,25 @@ import { LeadTable } from "./components/LeadTable";
 import { TaskManagement } from "./components/TaskManagement";
 import "./styles.css";
 
+const AnalyticsDashboard = lazy(() =>
+  import("./components/AnalyticsDashboard").then((module) => ({ default: module.AnalyticsDashboard })),
+);
+
+function AnalyticsPlaceholder({ message = "Loading analytics…" }) {
+  return (
+    <section className="panel" aria-busy={message.startsWith("Loading")}>
+      <div className="panel-heading">
+        <div>
+          <h2>Analytics</h2>
+          <p>{message}</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function AppShell() {
-  const { health, loading, error, refresh, setError } = useCRM();
+  const { health, loading, error, refresh, setError, user } = useCRM();
 
   return (
     <main className="app-shell">
@@ -60,7 +76,13 @@ function AppShell() {
         )}
 
         <LeadDashboard />
-        <AnalyticsDashboard />
+        {user ? (
+          <Suspense fallback={<AnalyticsPlaceholder />}>
+            <AnalyticsDashboard />
+          </Suspense>
+        ) : (
+          <AnalyticsPlaceholder message="Log in to view CRM analytics" />
+        )}
 
         <div className="crm-grid">
           <div className="primary-column">

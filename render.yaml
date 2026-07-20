@@ -25,16 +25,32 @@ services:
         generateValue: true
       - key: JWT_ALGORITHM
         value: HS256
+      - key: CRM_WEBHOOK_SECRET
+        sync: false
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "1440"
       - key: REPORTING_INTERVAL_MINUTES
         value: "1440"
       - key: REPORTING_EMAIL_TO
         sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: SMTP_STARTTLS
+        value: "true"
       - key: FRONTEND_ORIGINS
         value: https://ai-crm-frontend.onrender.com
       - key: PUBLIC_API_BASE_URL
         value: https://ai-crm-backend.onrender.com
+      - key: EMAIL_CLICK_ALLOWED_HOSTS
+        value: ai-crm-frontend.onrender.com
 
   - type: web
     name: ai-crm-frontend

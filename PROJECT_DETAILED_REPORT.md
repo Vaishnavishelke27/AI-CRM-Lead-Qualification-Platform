@@ -1,1878 +1,805 @@
-# Detailed Project Report: AI CRM
-
-## 1. Project Overview
-
-The project is named **AI CRM**. It is a full-stack Customer Relationship Management application built for managing leads, sales follow-up tasks, generated outreach emails, analytics, and AI-assisted lead processing.
-
-The project is implemented as a web application with two main parts:
-
-- A **React frontend** located in `frontend/`
-- A **FastAPI backend** located in `backend/`
-
-The backend exposes REST API endpoints and a WebSocket endpoint. The frontend consumes those endpoints and presents a CRM dashboard in the browser. The application stores CRM data in a relational database using SQLAlchemy models and supports PostgreSQL through Docker and environment configuration.
-
-The project focuses on these main CRM capabilities:
-
-- Creating, viewing, updating, filtering, sorting, and deleting leads
-- Automatically scoring leads using AI or deterministic fallback logic
-- Categorizing leads as Hot, Warm, or Cold
-- Assigning leads to sales owners based on category
-- Creating and updating follow-up tasks
-- Generating personalized email drafts for selected leads
-- Tracking generated email opens and clicks through tracking URLs
-- Displaying dashboard metrics and analytics
-- Authenticating users with JWT tokens
-- Restricting selected operations by user role
-- Importing leads from CSV files
-- Supporting n8n-style webhook workflows
-- Broadcasting lead updates over WebSockets
-- Running the stack with Docker Compose
-
-This report is strictly based on the files present in this project.
-
-## 2. Repository Structure
-
-The root folder contains the main project configuration and documentation:
-
-```text
-AI + CRM/
-  .env.example
-  .gitignore
-  docker-compose.yml
-  PROJECT_DETAILED_REPORT.md
-  README.md
-  render.yaml
-  backend/
-  frontend/
-```
-
-The important backend files are:
-
-```text
-backend/
-  Dockerfile
-  alembic.ini
-  models.py
-  requirements.txt
-  app/
-    __init__.py
-    config.py
-    database.py
-    main.py
-    models.py
-    schemas.py
-    services.py
-  services/
-    __init__.py
-    ai_service.py
-    assignment_service.py
-    auth_service.py
-    import_service.py
-    reporting_service.py
-    websocket_manager.py
-  alembic/
-    env.py
-    script.py.mako
-    versions/
-      20260708_0001_initial_crm_schema.py
-      20260708_0002_add_lead_metadata.py
-      20260708_0003_growth_features.py
-  workflows/
-    main_lead_processing.workflow.json
-    lead_enrichment_subworkflow.workflow.json
-    email_personalization_subworkflow.workflow.json
-    task_priority_subworkflow.workflow.json
-    error_retry_handler.workflow.json
-```
-
-The important frontend files are:
-
-```text
-frontend/
-  Dockerfile
-  index.html
-  package.json
-  package-lock.json
-  src/
-    main.jsx
-    styles.css
-    api/
-      client.js
-    context/
-      CRMContext.jsx
-    components/
-      AnalyticsDashboard.jsx
-      AuthPanel.jsx
-      EmailComposer.jsx
-      LeadDashboard.jsx
-      LeadDetail.jsx
-      LeadForm.jsx
-      LeadTable.jsx
-      TaskManagement.jsx
-```
-
-## 3. Technology Stack
-
-### 3.1 Frontend Stack
-
-The frontend is built with:
-
-- React
-- React DOM
-- Vite
-- JavaScript modules
-- CSS
-- lucide-react
-- Recharts
-
-The `frontend/package.json` file defines the frontend package as `ai-crm-frontend`. It includes the scripts:
+# Project Detailed Report: AI CRM
 
-```text
-npm run dev
-npm run build
-npm run preview
-```
+## Project Introduction
 
-Vite is used as the development server and production bundler. React is used to build the user interface. lucide-react provides icons for navigation, buttons, KPI cards, and action controls. Recharts is used for analytics charts.
+AI CRM is a smart Customer Relationship Management system. A Customer Relationship Management system is used by a business to manage its relationship with possible customers and existing customers.
 
-### 3.2 Backend Stack
+The main focus of this project is lead management. A lead is a person, company, or organization that may become a customer in the future. Every business wants to convert good leads into real customers. For this, the business needs a proper system to store lead details, understand lead quality, plan follow-up actions, and communicate with leads at the right time.
 
-The backend is built with:
+AI CRM is designed to make this process easier. It keeps lead information organized and uses artificial intelligence to help users make better decisions. The system can help identify which leads are more important, which leads need quick attention, and what type of message can be sent to them.
 
-- Python
-- FastAPI
-- Uvicorn
-- SQLAlchemy
-- Pydantic
-- Alembic
-- python-jose
-- passlib
-- bcrypt
-- OpenAI SDK
-- Anthropic SDK
-- httpx
-- python-multipart
-- email-validator
-- psycopg2-binary
+This project is useful for sales teams, marketing teams, business owners, customer support teams, and managers. It gives them a single place to manage customer-related work.
 
-FastAPI defines the API routes. Uvicorn runs the ASGI server. SQLAlchemy defines models and database sessions. Pydantic validates API request and response schemas. Alembic stores database migration files. python-jose creates and verifies JWT tokens. passlib and bcrypt handle password hashing. The OpenAI and Anthropic SDKs are used when AI provider keys are configured. httpx is currently used in the reporting service placeholder.
+## Meaning of CRM
 
-### 3.3 Database Stack
+CRM means Customer Relationship Management. It is a method used by businesses to manage interactions with customers and possible customers.
 
-The project is designed around SQLAlchemy and a relational database.
+A CRM system stores customer information in an organized way. It helps a business remember customer details, track conversations, manage follow-up tasks, and understand sales progress.
 
-In the current code, the default `DATABASE_URL` in `backend/app/config.py` is:
+Without a CRM system, businesses may use notebooks, spreadsheets, messages, or separate files to manage leads. This can become confusing when the number of leads increases. Important information may be lost, follow-ups may be missed, and sales opportunities may be wasted.
 
-```text
-postgresql://postgres:postgres@127.0.0.1:5433/ai_crm
-```
+AI CRM solves this problem by keeping all important information in one system.
 
-The Docker Compose file maps the PostgreSQL container from container port `5432` to host port `5433`:
+## Meaning of AI in This Project
 
-```text
-5433:5432
-```
+AI means Artificial Intelligence. In this project, AI is used to make the CRM system smarter.
 
-Inside Docker, the backend receives:
+AI does not replace the sales team. It supports the sales team by helping with repeated and time-consuming work. It can analyze lead information, create useful suggestions, generate email content, and help classify leads.
 
-```text
-postgresql://postgres:postgres@postgres:5432/ai_crm
-```
+In a normal CRM, the user has to manually decide which lead is important. In AI CRM, the system can help by giving a lead score and category. This makes decision-making faster and easier.
 
-The database layer also contains SQLite-specific compatibility logic. If `DATABASE_URL` starts with `sqlite`, the backend uses SQLite connection arguments and performs simple column-add checks during startup. However, SQLite is not the default value in the current `config.py`; PostgreSQL on port `5433` is the current default.
-
-## 4. High-Level Architecture
+The AI part of the project adds intelligence to the normal CRM process.
 
-The project follows a separated frontend-backend architecture:
+## Purpose of the Project
 
-```text
-Browser
-  |
-  v
-React + Vite frontend
-  |
-  | HTTP fetch requests
-  | WebSocket connection
-  v
-FastAPI backend
-  |
-  v
-SQLAlchemy ORM
-  |
-  v
-PostgreSQL database
-```
+The purpose of AI CRM is to make lead handling simple, smart, and organized.
 
-The frontend runs on:
+Many businesses collect leads from websites, advertisements, social media, events, referrals, and other sources. After collecting these leads, the business must decide which leads should be contacted first. This is not always easy because every lead has different value.
 
-```text
-http://localhost:5173
-```
+Some leads are ready to buy soon. Some leads are only asking for information. Some leads may not be serious. If the sales team treats all leads equally, they may waste time on low-quality leads and miss high-quality opportunities.
 
-The backend runs on:
+AI CRM helps solve this problem by organizing leads and giving better visibility into lead quality. It supports the sales process from lead creation to follow-up, communication, tracking, and reporting.
 
-```text
-http://localhost:8000
-```
+## Main Aim of the Project
 
-The database is PostgreSQL when using Docker Compose. The host port is:
+The main aim of the project is to build a CRM system that improves sales productivity.
 
-```text
-localhost:5433
-```
+The project aims to reduce manual work, improve lead prioritization, support better communication, and help teams make decisions using data.
 
-This separation allows the frontend to focus on interface behavior while the backend handles data validation, persistence, authentication, AI logic, reporting, imports, webhooks, and WebSocket updates.
+It also aims to make the sales process more systematic. Instead of depending only on memory or manual notes, users can depend on the system to manage lead details, tasks, email drafts, analytics, and reports.
 
-## 5. Backend Application Entry Point
+The project also aims to bring AI into daily sales work in a practical way.
 
-The backend starts from:
+## Main Objectives of the Project
 
-```text
-backend/app/main.py
-```
+The first objective is to manage lead information in one place. This includes storing important details such as name, email, company, source, status, score, and category.
 
-This file creates the FastAPI app:
+The second objective is to help users understand lead priority. The system uses scoring and categorization to show whether a lead is hot, warm, or cold.
 
-```python
-app = FastAPI(title="AI CRM API", version="0.2.0")
-```
+The third objective is to help users manage follow-up tasks. A lead is valuable only when the sales team follows up properly. The system helps users create and manage tasks.
 
-The backend also adds CORS middleware so the React frontend can call the API from a different origin:
+The fourth objective is to support personalized email communication. The system can help generate email drafts based on lead information.
 
-```python
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.frontend_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-```
+The fifth objective is to provide analytics and reports. These help users understand business performance and lead progress.
 
-The backend startup event performs two actions:
+The sixth objective is to support automation. The system can work with external workflows so that repeated tasks can be handled automatically.
 
-- Calls `initialize_database()`
-- Starts a scheduled reporting loop
+The seventh objective is to protect CRM data through authentication and access control.
 
-The reporting loop sleeps for `REPORTING_INTERVAL_MINUTES * 60` seconds, builds a summary, and calls the reporting sender. The sender is currently a placeholder because no real email provider endpoint is configured.
+## Need of the Project
 
-## 6. Configuration
+Businesses need this type of project because lead data can become difficult to manage as the business grows.
 
-Configuration is defined in:
+When there are only a few leads, manual tracking may be possible. But when there are many leads, manual tracking becomes slow and unreliable.
 
-```text
-backend/app/config.py
-```
+Sales teams need to know which lead to contact, when to contact them, what to say, and what action has already been taken. If this information is scattered, the team may repeat work or miss important actions.
 
-The `Settings` class reads environment variables with default values. The main settings are:
+AI CRM provides a structured way to handle this. It helps the team work with better planning and better information.
 
-- `DATABASE_URL`
-- `OPENAI_API_KEY`
-- `CLAUDE_API_KEY`
-- `AI_PROVIDER`
-- `OPENAI_MODEL`
-- `CLAUDE_MODEL`
-- `AI_CACHE_TTL_SECONDS`
-- `AI_RATE_LIMIT_PER_MINUTE`
-- `JWT_SECRET_KEY`
-- `JWT_ALGORITHM`
-- `ACCESS_TOKEN_EXPIRE_MINUTES`
-- `REPORTING_INTERVAL_MINUTES`
-- `REPORTING_EMAIL_TO`
-- `FRONTEND_ORIGINS`
-- `PUBLIC_API_BASE_URL`
+The project is also needed because modern sales teams want faster responses. A lead that is contacted quickly has a better chance of conversion. AI CRM helps identify important leads faster.
 
-The `.env.example` file lists expected environment variables for local or deployed configuration. It also includes workflow-related values:
+## Problem Statement
 
-- `CRM_API_BASE_URL`
-- `COMPANY_SCRAPE_URL`
-- `DECISION_MAKER_LOOKUP_URL`
+The main problem is that lead management can be time-consuming and disorganized when it is done manually.
 
-These values support the n8n workflow files included in `backend/workflows/`.
+A business may receive many leads from different sources. Each lead may have different interest levels, different business needs, and different chances of conversion. It is difficult for a sales team to manually study every lead and decide priority.
 
-## 7. Database Layer
+Another problem is missed follow-up. If a lead is not contacted at the right time, the lead may lose interest or choose another company.
 
-The database connection is defined in:
+Another problem is poor communication. If every email is written manually, it takes time and the quality may not remain consistent.
 
-```text
-backend/app/database.py
-```
+Another problem is lack of visibility. Without analytics and reporting, managers may not clearly know how many leads are active, how many are high priority, and how the sales process is performing.
 
-This file creates:
+AI CRM is designed to solve these problems.
 
-- SQLAlchemy engine
-- Session factory
-- Declarative base class
-- `initialize_database()`
-- `get_db()` dependency
+## Proposed Solution
 
-The engine is created using the configured database URL:
+The proposed solution is a smart CRM system that stores lead data, analyzes lead quality, manages tasks, generates communication, tracks engagement, and provides analytics.
 
-```python
-engine = create_engine(settings.database_url, connect_args=connect_args, pool_pre_ping=True)
-```
+The system gives users a central place for lead-related activities. Instead of using many different tools, users can manage important sales work through one application.
 
-The `pool_pre_ping=True` option helps detect stale database connections before using them.
+The system also uses AI support to reduce manual decision-making. AI can help score leads and generate email content. This makes the sales process faster and more efficient.
 
-The `get_db()` function is a FastAPI dependency. API routes use it to receive a database session:
+The solution also includes automation support so that external workflow tools can connect with the CRM. This makes the system more flexible for real business use.
 
-```python
-db: Session = Depends(get_db)
-```
+## Scope of the Project
 
-The session is yielded to the route and closed afterward.
+The scope of the project covers lead management, task management, email generation, analytics, authentication, reporting, automation, lead import, and real-time updates.
 
-The `initialize_database()` function calls:
+The system is mainly focused on helping sales teams manage leads from the time they enter the system until they are followed up and tracked.
 
-```python
-Base.metadata.create_all(bind=engine)
-```
+The project does not only store data. It also helps users understand the data. This is done through scoring, categorization, analytics, and reports.
 
-This creates missing tables from the SQLAlchemy models. For SQLite only, it also checks existing columns and adds missing compatibility columns for lead metadata, assignment, and email tracking.
+The project also supports future expansion. More AI features, more communication channels, and more automation can be added later.
 
-## 8. Database Models
+## Users of the System
 
-The main database models are defined in:
+The first type of user is a sales executive. A sales executive uses the system to view leads, contact leads, update lead status, and complete follow-up tasks.
 
-```text
-backend/app/models.py
-```
+The second type of user is a sales manager. A sales manager uses the system to monitor team performance, check lead progress, and understand analytics.
 
-There is also a compatibility re-export file:
+The third type of user is an administrator. An administrator may manage users, roles, access, and system settings.
 
-```text
-backend/models.py
-```
+The fourth type of user is a business owner. A business owner may use reports and analytics to understand business growth and sales performance.
 
-That file imports `Email`, `Lead`, `Task`, and `User` from `app.models`.
+The fifth type of user is a marketing team member. A marketing user may use the system to understand lead sources and campaign quality.
 
-The project defines four main tables:
+## General Working of the System
 
-- `leads`
-- `tasks`
-- `emails`
-- `users`
+The system begins when a user adds a lead or imports leads into the CRM.
 
-### 8.1 Lead Model
+After the lead is added, the system stores the lead details. The system can then analyze the lead and assign a score. Based on the score, the lead can be categorized as hot, warm, or cold.
 
-The `Lead` model represents a possible customer.
+The user can view the lead on the dashboard. The user can open the lead details, update information, create a task, or generate an email.
 
-Important fields:
+If the user sends or tracks email communication, the system can store engagement information such as opens or clicks.
 
-- `id`
-- `name`
-- `email`
-- `company`
-- `source`
-- `status`
-- `lead_score`
-- `category`
-- `assigned_to`
-- `ai_metadata`
-- `created_at`
+Managers can view analytics and reports to understand how leads are performing.
 
-The table includes a score constraint:
+This creates a complete lead management flow.
 
-```text
-lead_score >= 0 AND lead_score <= 100
-```
+## System Architecture Theory
 
-The `email` field is unique and indexed. This prevents duplicate lead emails.
+The project follows a web application architecture.
 
-The `ai_metadata` Python attribute is stored in the database column named `metadata`. It stores JSON data such as scoring results, enrichment results, assignment information, generated email metadata, n8n workflow payloads, and task assignment context.
+In this architecture, the user interacts with the system through a browser. The browser shows the user interface. The user interface sends requests to the main application logic. The main application logic communicates with the database and other services.
 
-The `Lead` model has relationships to:
+This separation is useful because each part has a clear responsibility. The user interface focuses on display and interaction. The backend logic focuses on processing and rules. The database focuses on storing information.
 
-- `tasks`
-- `emails`
+This type of architecture makes the system easier to manage and expand.
 
-Both relationships use `cascade="all, delete-orphan"`, so deleting a lead also deletes its related tasks and emails through the ORM relationship.
+## Frontend Theory
 
-### 8.2 Task Model
+The frontend is the part of the system that the user can see.
 
-The `Task` model represents a follow-up action linked to a lead.
+It provides screens, forms, tables, buttons, charts, and dashboards. It allows users to perform actions such as adding leads, viewing leads, editing details, managing tasks, generating emails, and checking analytics.
 
-Important fields:
+The frontend makes the system user-friendly. A user does not need to know how the system works internally. The user only needs to interact with the visible screens.
 
-- `id`
-- `lead_id`
-- `description`
-- `due_date`
-- `status`
+The frontend also presents information in a clear and organized way. For example, leads may be shown in a table so users can compare them easily. Analytics may be shown in charts so users can understand performance quickly.
 
-The `lead_id` field references:
+The frontend is important because a good CRM must be easy to use. If the interface is confusing, users may avoid using the system properly.
 
-```text
-leads.id
-```
+## Backend Theory
 
-The foreign key uses `ondelete="CASCADE"`. The default task status is:
+The backend is the working brain of the system.
 
-```text
-open
-```
+It receives requests from the frontend, checks the request, applies rules, performs the required operation, communicates with the database, and sends a response back.
 
-### 8.3 Email Model
+For example, when a user adds a new lead, the backend receives the lead details, validates the data, stores the lead, may calculate a score, may assign a category, and then sends the result back to the frontend.
 
-The `Email` model stores generated email drafts and tracking data.
+The backend also handles important features such as authentication, authorization, AI processing, task creation, email generation, reporting, importing, automation, and real-time communication.
 
-Important fields:
+The backend is important because it controls the correctness and security of the system.
 
-- `id`
-- `lead_id`
-- `subject`
-- `body`
-- `sent_at`
-- `tracking_token`
-- `opened_at`
-- `clicked_at`
-- `open_count`
-- `click_count`
+## Database Theory
 
-The email belongs to a lead through `lead_id`. The `tracking_token` is unique and indexed. It is used by the tracking endpoints for open and click tracking.
+The database is the storage part of the system.
 
-The code generates email records, but the frontend sends actual email content through the user's local mail client using a `mailto:` link. The backend does not currently send generated emails through an email provider.
+It stores data in an organized way so that the system can use it later. CRM data must be stored carefully because it contains important business information.
 
-### 8.4 User Model
+The database stores users, leads, tasks, email records, lead scores, lead categories, tracking information, metadata, and other records.
 
-The `User` model stores login accounts.
+The database allows the system to search, filter, update, and retrieve information whenever needed.
 
-Important fields:
+Without a database, the system would not be able to remember leads, user accounts, task history, or reports.
 
-- `id`
-- `email`
-- `full_name`
-- `hashed_password`
-- `role`
-- `is_active`
-- `created_at`
+## Lead Management Theory
 
-The allowed roles are enforced by the `UserCreate` schema:
+Lead management is the most important part of AI CRM.
 
-```text
-admin
-manager
-sales
-```
+A lead is a possible customer. A lead may come from a website form, advertisement, phone call, social media campaign, business event, referral, or manual entry.
 
-The default role is:
+Lead management means collecting lead information, storing it, organizing it, tracking it, and moving it through the sales process.
 
-```text
-sales
-```
+In this system, users can create leads, view leads, update leads, delete leads, filter leads, and check lead details.
 
-## 9. Pydantic Schemas
+Good lead management helps a business avoid losing opportunities. It ensures that every lead is recorded and can be followed up properly.
 
-API schemas are defined in:
+## Lead Details Theory
 
-```text
-backend/app/schemas.py
-```
+Each lead contains important information.
 
-These schemas validate request bodies and shape API responses.
+Basic information may include the lead name, email address, phone number, company name, source, and status.
 
-Important lead schemas:
+Business information may include the lead requirement, interest level, company size, budget, category, and expected value.
 
-- `LeadBase`
-- `LeadCreate`
-- `LeadUpdate`
-- `LeadCaptureRequest`
-- `LeadRead`
+System information may include score, assigned owner, creation time, update time, communication history, and AI-generated insights.
 
-Important task schemas:
+The more useful information a lead has, the better the sales team can understand and handle that lead.
 
-- `TaskCreate`
-- `TaskUpdate`
-- `TaskRead`
-- `N8nCreateTaskRequest`
-- `TaskWebhookResponse`
+## Lead Source Theory
 
-Important email schemas:
+Lead source means where the lead came from.
 
-- `EmailGenerateRequest`
-- `EmailRead`
+A lead may come from a website, advertisement, social media, email campaign, referral, event, direct call, or manual entry.
 
-Important authentication schemas:
+Knowing the lead source is important because it helps the business understand which marketing channel is working better.
 
-- `UserCreate`
-- `UserRead`
-- `LoginRequest`
-- `TokenResponse`
+For example, if most high-quality leads come from a website form, the business may invest more in website marketing. If a source gives many poor-quality leads, the business may improve or reduce that source.
 
-Important webhook and analytics schemas:
+Lead source analysis helps in better marketing decisions.
 
-- `LeadEnrichmentWebhookRequest`
-- `LeadScoreWebhookRequest`
-- `WebhookLeadResponse`
-- `N8nUpdateLeadRequest`
-- `BulkImportResponse`
-- `AnalyticsResponse`
-- `ReportingResponse`
+## Lead Status Theory
 
-The schemas enforce rules such as:
+Lead status shows the current stage of a lead.
 
-- Lead score must be between 0 and 100
-- Email fields must be valid email addresses
-- Required names must not be empty
-- User passwords must be at least 8 characters
-- User role must be `admin`, `manager`, or `sales`
-- IDs in request bodies must be greater than zero
+A lead may be new, contacted, qualified, in progress, converted, or lost.
 
-This validation protects the backend from invalid input before database operations run.
+The status helps the sales team understand what has already happened with the lead and what should happen next.
 
-## 10. Authentication and Authorization
+Without status tracking, it becomes difficult to know whether a lead has been contacted or ignored.
 
-Authentication logic is implemented in:
+Lead status makes the sales process clearer and more organized.
 
-```text
-backend/services/auth_service.py
-```
+## AI Lead Scoring Theory
 
-The project uses:
+AI lead scoring means giving a numerical value to a lead based on its quality and possibility of conversion.
 
-- Password hashing
-- JWT access tokens
-- OAuth2 bearer token extraction
-- Role-based authorization dependencies
+The score helps users understand which leads are more important.
 
-### 10.1 Password Hashing
+AI can study available lead information and estimate the value of the lead. It may consider details such as source, company, interest level, communication, and other available information.
 
-The project uses passlib with bcrypt:
+A high score means the lead appears more promising. A low score means the lead may not be ready or may not match the business target.
 
-```python
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-```
+Lead scoring is useful because sales teams usually have limited time. They should spend more time on leads with higher chances of conversion.
 
-During registration, the backend stores a hashed password instead of the plain password:
+## Lead Categorization Theory
 
-```python
-hashed_password=hash_password(user.password)
-```
+Lead categorization means grouping leads into simple priority levels.
 
-During login, the backend verifies the submitted password against the stored hash:
+In this project, leads can be classified as hot, warm, or cold.
 
-```python
-verify_password(request.password, user.hashed_password)
-```
+A hot lead is a high-priority lead. This lead may be very interested, ready to buy, or strongly matched with the business offering.
 
-### 10.2 JWT Tokens
+A warm lead is a medium-priority lead. This lead may show interest but may need more explanation, time, or follow-up.
 
-After successful login, the backend creates a JWT token containing:
+A cold lead is a low-priority lead. This lead may not be ready, may have low interest, or may not be a strong match.
 
-- `sub`: user email
-- `role`: user role
-- `exp`: expiration time
+Categorization makes lead handling easy because users can quickly understand priority without reading every detail.
 
-The token is encoded using:
+## Lead Assignment Theory
 
-- `JWT_SECRET_KEY`
-- `JWT_ALGORITHM`
+Lead assignment means giving a lead to a specific person or team for follow-up.
 
-The frontend stores the token in `localStorage` under:
+In a business, many sales users may work on leads. If leads are not assigned clearly, two users may contact the same lead, or no one may contact the lead.
 
-```text
-ai_crm_token
-```
+Lead assignment creates responsibility. It tells who should handle the lead.
 
-Future API calls include:
+The system can support assignment based on lead priority or category. For example, hot leads may be assigned to experienced sales users, while cold leads may be handled later or through nurturing.
 
-```text
-Authorization: Bearer <token>
-```
+Proper assignment improves accountability and response time.
 
-### 10.3 Current User Resolution
+## Task Management Theory
 
-The `get_current_user()` dependency:
+Task management helps users plan and complete follow-up actions.
 
-1. Reads the bearer token
-2. Decodes the JWT
-3. Extracts the email from `sub`
-4. Looks up an active user in the database
-5. Returns the user or raises an authentication error
+A task can be a phone call, email, meeting, reminder, demo, proposal, or follow-up note.
 
-### 10.4 Role-Based Access
+In sales, follow-up is very important. A lead may not convert after one contact. The sales team may need to contact the lead multiple times.
 
-The `require_roles()` function creates dependencies for protected routes.
+The task feature helps users remember what action is needed and when it should be done.
 
-Routes that require roles include:
+Task management reduces missed opportunities and improves team discipline.
 
-- `POST /leads/import`: `admin` or `manager`
-- `GET /leads/import/{job_id}`: `admin` or `manager`
-- `GET /analytics/overview`: `admin`, `manager`, or `sales`
-- `POST /reports/send-summary`: `admin` or `manager`
+## Task Priority Theory
 
-If a logged-in user does not have one of the required roles, the backend returns:
+Task priority shows how important a task is.
 
-```text
-403 Forbidden
-```
+Some tasks need immediate action, while others can wait. For example, calling a hot lead may be more urgent than sending a general email to a cold lead.
 
-## 11. AI Service
+Priority helps users arrange their work properly. It allows them to focus on important tasks first.
 
-AI logic is implemented in:
+This improves productivity because users do not waste time deciding what to do next.
 
-```text
-backend/services/ai_service.py
-```
+## Email Generation Theory
 
-This service handles:
+Email generation helps users create email drafts for leads.
 
-- AI provider selection
-- OpenAI calls
-- Claude calls
-- JSON extraction from model responses
-- Lead scoring
-- Lead enrichment
-- Personalized email generation
-- Deterministic fallback logic
-- In-memory TTL caching
-- Sliding-window rate limiting
+Writing personalized emails manually can take a lot of time. If the business has many leads, this becomes a repeated task.
 
-### 11.1 Supported Providers
+AI CRM can help generate email content using available lead information. The email can be more relevant because it can include the lead name, company context, interest, or requirement.
 
-The service can call OpenAI or Anthropic Claude.
+The user can review and adjust the generated email before using it.
 
-OpenAI uses:
+This feature saves time and improves communication quality.
 
-```text
-OPENAI_API_KEY
-OPENAI_MODEL
-```
+## Personalized Communication Theory
 
-Claude uses:
+Personalized communication means sending messages that match the lead's needs and context.
 
-```text
-CLAUDE_API_KEY
-CLAUDE_MODEL
-```
+A generic message may not create strong interest. A personalized message feels more relevant to the lead.
 
-Provider preference is controlled by:
+For example, a message that mentions the lead's company or requirement may receive a better response than a common message.
 
-```text
-AI_PROVIDER
-```
+AI CRM supports personalization by using lead information while generating communication.
 
-If `AI_PROVIDER` is `claude` and a Claude key is configured, Claude is used. Otherwise, OpenAI is used if an OpenAI key exists. If only a Claude key exists, Claude is used.
+Personalized communication can improve trust and engagement.
 
-### 11.2 JSON-Only AI Responses
+## Email Tracking Theory
 
-The AI prompts tell the provider to return only valid JSON. The service also includes `_extract_json()`, which attempts to parse a response as JSON. If the whole response is not valid JSON, it searches for a JSON object inside the text.
+Email tracking helps the business understand how leads respond to emails.
 
-### 11.3 AI Cache
+The system can track whether an email was opened. It can also track whether a link in the email was clicked.
 
-The project uses an in-memory TTL cache:
+This information is useful because it shows engagement.
 
-```python
-cache = InMemoryTTLCache(settings.ai_cache_ttl_seconds)
-```
+If a lead opens an email many times or clicks a link, the lead may be interested. The sales team can follow up quickly.
 
-Cache keys are based on:
+If a lead does not open the email, the team may try a different approach later.
 
-- operation name
-- normalized JSON payload
-- SHA-256 hash
+Email tracking helps convert communication into useful sales signals.
 
-If the same AI operation is requested with the same payload before the TTL expires, the cached value is reused and returned with:
+## Analytics Theory
 
-```text
-cached: true
-```
+Analytics means studying data to understand performance.
 
-The cache exists only in memory. It is lost when the backend process restarts.
+In AI CRM, analytics can help users understand lead count, lead sources, lead categories, lead scores, task status, and sales movement.
 
-### 11.4 AI Rate Limiting
+Analytics helps convert raw CRM data into useful knowledge.
 
-The project uses a sliding-window rate limiter:
+For example, users can see how many leads are hot, how many are cold, which source gives better leads, and how many tasks are pending.
 
-```python
-rate_limiter = SlidingWindowRateLimiter(settings.ai_rate_limit_per_minute)
-```
+Without analytics, users may only see individual records. With analytics, they can understand the bigger picture.
 
-The limiter stores timestamps of recent AI calls. If the number of calls within the 60-second window reaches the configured maximum, it raises:
+## Dashboard Theory
 
-```text
-AI API rate limit exceeded
-```
+A dashboard is a visual summary of important information.
 
-The API wrapper converts this into:
+In this project, the dashboard helps users quickly understand the current state of the CRM.
 
-```text
-429 Too Many Requests
-```
+It may show lead numbers, categories, recent activity, tasks, charts, and performance summaries.
 
-### 11.5 Lead Scoring
+A good dashboard saves time because users do not need to search through many records to understand what is happening.
 
-Lead scoring uses `score_lead_with_ai()`.
+The dashboard is especially useful for managers and sales users who need quick updates.
 
-The AI prompt asks for:
+## Reporting Theory
 
-- score from 0 to 100
-- category as Hot, Warm, or Cold
-- reasoning
-- signals
+Reporting means preparing structured summaries of important information.
 
-If AI is unavailable or does not return a score, the deterministic fallback runs.
+Reports help users review performance over a period of time. They can show lead progress, task activity, score distribution, source performance, and sales follow-up status.
 
-The fallback starts from a score of `20` and adjusts it using:
+Reports are useful for meetings, planning, monitoring, and decision-making.
 
-- company size
-- industry
-- engagement level
-- source
+A report gives a clear view of what happened, what is pending, and where improvement is needed.
 
-Examples of positive scoring signals in the fallback:
+Reporting helps the business move from guesswork to data-based decisions.
 
-- enterprise, 1000+, or large company size
-- SaaS, software, technology, finance, or healthcare industry
-- high engagement, demo requested, pricing page, or replied
-- referral, demo, webinar, or partner source
+## Authentication Theory
 
-The final score is clamped between 0 and 100.
+Authentication means checking the identity of a user.
 
-Categories are assigned by score:
+In AI CRM, users should not be allowed to access the system without logging in. CRM data may contain private customer and business information.
 
-```text
-75 to 100 = Hot
-45 to 74  = Warm
-0 to 44   = Cold
-```
+Authentication protects the system by allowing only valid users to enter.
 
-### 11.6 Lead Enrichment
+It usually involves user registration, login, and session handling.
 
-Lead enrichment uses `enrich_lead_with_ai()`.
+This feature is important for security and trust.
 
-The AI prompt asks for:
+## Authorization Theory
 
-- likely industry
-- company size
-- buyer persona
-- pain points
-- recommended next action
-- confidence
+Authorization means controlling what a user is allowed to do after logging in.
 
-If the provider is unavailable or returns an error, fallback enrichment is returned. The fallback stores a low-confidence result and recommends manual review and follow-up.
+Not every user should have the same level of access.
 
-### 11.7 Personalized Email Generation
+For example, an administrator may manage more settings, while a sales user may only manage assigned leads and tasks.
 
-Email generation uses `generate_personalized_email()`.
+Authorization helps protect sensitive actions and prevents misuse.
 
-The function receives:
+It also helps businesses follow proper internal control.
 
-- lead data
-- purpose
-- tone
+## Role-Based Access Theory
 
-It asks AI to return:
+Role-based access is a simple way to manage permissions.
 
-- subject
-- body
-- personalization notes
+Users are given roles, and each role has specific permissions.
 
-If AI is unavailable, it generates a deterministic fallback email using the lead name, company, and requested purpose.
+For example, an admin role may have full control, a manager role may view reports and team data, and a sales role may manage leads and tasks.
 
-## 12. Lead Assignment
+This makes permission management easier because access is controlled by role instead of setting permissions separately for every user.
 
-Lead assignment is implemented in:
+Role-based access improves security and organization.
 
-```text
-backend/services/assignment_service.py
-```
+## Data Security Theory
 
-The project uses static sales routes:
+Data security means protecting information from unauthorized access, misuse, or loss.
 
-```text
-Hot  -> enterprise-ae@crm.local, senior-ae@crm.local
-Warm -> growth-ae@crm.local, midmarket-ae@crm.local
-Cold -> sdr@crm.local, nurture@crm.local
-```
+CRM systems contain customer details, business leads, communication history, and performance data. This data must be handled carefully.
 
-If the lead already has a category, that category is used. Otherwise, the category is inferred from score:
+AI CRM supports security through authentication, access control, protected data flow, and controlled user actions.
 
-- score >= 75: Hot
-- score >= 45: Warm
-- otherwise: Cold
+Security is important because customer trust and business reputation depend on safe data handling.
 
-The selected assignee is chosen using the lead ID modulo the number of possible routes. The assignee is stored in:
+## CSV Import Theory
 
-```text
-lead.assigned_to
-```
+CSV import allows users to add many leads at once.
 
-The assignment result is also stored in lead metadata:
+A CSV file is commonly used to store tabular data. Many businesses keep leads in spreadsheets. Instead of entering each lead manually, users can import a file.
 
-```text
-ai_metadata.assignment
-```
+This saves time and reduces repeated typing.
 
-## 13. Task Description Helper
+After importing, the system can process the leads and include them in the CRM workflow.
 
-The file:
+CSV import is useful when a business is moving from manual records to a proper CRM system.
 
-```text
-backend/app/services.py
-```
+## Bulk Lead Processing Theory
 
-contains helper functions. The active helper used by `main.py` is:
+Bulk lead processing means handling many leads together.
 
-```python
-build_task_description(lead)
-```
+When many leads are imported, the system can process them in a structured way. It can store the data, score the leads, categorize them, and prepare them for follow-up.
 
-It returns a simple follow-up description such as:
+This is useful because businesses may receive large lead lists from campaigns, events, or online forms.
 
-```text
-Follow up with Lead Name at Company
-```
+Bulk processing makes the system practical for real business use.
 
-The same file also contains older helper functions for basic lead scoring and email content generation, but the main API currently uses the richer service modules for AI scoring and email generation.
+## Real-Time Update Theory
 
-## 14. CSV Import
+Real-time updates allow users to see changes quickly without manually refreshing the page.
 
-CSV import logic is implemented in:
+This is useful when multiple users are working on the CRM at the same time.
 
-```text
-backend/services/import_service.py
-```
+For example, if a lead score is updated or a new lead is added, the dashboard can show the update quickly.
 
-The API route is:
+Real-time updates improve teamwork because users can see current information.
 
-```text
-POST /leads/import
-```
+They also improve user experience because the system feels active and responsive.
 
-This route requires an authenticated `admin` or `manager`.
+## Webhook Theory
 
-The import route:
+A webhook is a method that allows one system to send information to another system automatically.
 
-1. Accepts an uploaded file
-2. Requires the filename to end with `.csv`
-3. Reads the CSV as UTF-8 with BOM support
-4. Creates a random job ID
-5. Stores the job in the in-memory `IMPORT_JOBS` dictionary
-6. Runs processing as a background task
-7. Returns a queued response
+In AI CRM, webhooks can help connect the CRM with external automation tools.
 
-The actual CSV processing:
+For example, an external workflow may send a new lead to the CRM. Another workflow may ask the CRM to update lead information, generate an email, or create a task.
 
-1. Uses `csv.DictReader`
-2. Requires `name` and `email`
-3. Skips rows missing name or email
-4. Skips duplicate email addresses
-5. Reads optional fields such as company, source, status, company size, industry, and engagement level
-6. Scores each lead using the AI scoring service
-7. Creates the lead
-8. Assigns the lead
-9. Commits the imported records
-10. Returns created and skipped counts
+Webhooks are useful because they reduce manual work and allow systems to work together.
 
-The job status can be checked through:
+## Automation Theory
 
-```text
-GET /leads/import/{job_id}
-```
+Automation means performing repeated tasks automatically.
 
-Import jobs are stored in memory. They are not persisted in the database.
+In this project, automation can help with lead enrichment, lead scoring, email generation, task creation, and workflow updates.
 
-## 15. Reporting
+Automation saves time and reduces human error.
 
-Reporting logic is implemented in:
+It also helps businesses respond faster. For example, when a lead is captured, the system can quickly score it and create a follow-up task.
 
-```text
-backend/services/reporting_service.py
-```
+Automation makes the CRM more powerful and efficient.
 
-The summary builder calculates:
+## Lead Enrichment Theory
 
-- generated timestamp
-- total leads
-- hot leads
-- conversion rate
-- open tasks
+Lead enrichment means improving lead information by adding more useful details.
 
-Converted leads are counted when status is one of:
+Sometimes a lead enters the system with only basic information. For example, it may only have a name and email.
 
-```text
-converted
-won
-customer
-```
+Enrichment can add more context such as company details, possible interest, business type, or other helpful information.
 
-Open tasks are counted when task status is not:
+Better lead information helps the sales team understand the lead more clearly.
 
-```text
-done
-```
+Lead enrichment improves scoring, communication, and follow-up planning.
 
-The report send route is:
+## AI Insights Theory
 
-```text
-POST /reports/send-summary
-```
+AI insights are useful observations created by artificial intelligence.
 
-This route requires `admin` or `manager`.
+AI can study lead information and provide helpful suggestions. These suggestions may explain why a lead is important, what type of message may work, or what next action may be suitable.
 
-The `send_summary()` function currently behaves as follows:
+AI insights help users make better decisions without manually analyzing every detail.
 
-- If `REPORTING_EMAIL_TO` is not configured, it returns `sent: false`
-- If `REPORTING_EMAIL_TO` is configured, it still returns `sent: false` because the transactional email provider endpoint is not configured
+They are especially useful when there are many leads and limited time.
 
-Therefore, reporting summary generation is implemented, but real email delivery is still a placeholder.
+## Sales Funnel Theory
 
-## 16. WebSockets
+A sales funnel represents the journey of a lead from first contact to final conversion.
 
-WebSocket connection management is implemented in:
+At the top of the funnel, there may be many leads. As the process continues, some leads become qualified, some move forward, and some are lost.
 
-```text
-backend/services/websocket_manager.py
-```
+The funnel helps businesses understand how leads move through the sales process.
 
-The route is:
+AI CRM can support funnel visibility by tracking lead status, category, and progress.
 
-```text
-WS /ws/leads
-```
+This helps managers identify where leads are dropping and where improvement is needed.
 
-The connection manager keeps an in-memory list of active WebSocket connections. It can:
+## Lead Conversion Theory
 
-- accept a new connection
-- remove a disconnected connection
-- broadcast JSON messages to active clients
+Lead conversion means turning a lead into a customer.
 
-The backend broadcasts messages when:
+The goal of lead management is not only to store leads but to increase conversion.
 
-- a lead score is updated
-- a bulk import completes
-- a bulk import fails
+A lead is more likely to convert when the business responds quickly, understands the lead's need, sends relevant communication, and follows up properly.
 
-The frontend opens a WebSocket connection in `CRMContext.jsx`. When a message arrives, the frontend calls `refresh()` to reload CRM data.
+AI CRM supports conversion by helping users prioritize leads, create tasks, generate emails, and track engagement.
 
-## 17. API Routes
+## Customer Follow-Up Theory
 
-The backend routes are defined in:
+Follow-up is the process of contacting a lead after the first interaction.
 
-```text
-backend/app/main.py
-```
+Many leads do not become customers immediately. They may need reminders, explanations, offers, meetings, or more information.
 
-### 17.1 Health Route
+The system helps users plan and manage follow-ups through tasks and communication tracking.
 
-```text
-GET /health
-```
+Good follow-up builds trust and increases the chance of conversion.
 
-Returns:
+Missed follow-up can result in lost business.
 
-```json
-{"status":"ok"}
-```
+## Communication History Theory
 
-This route confirms that the backend process is running.
+Communication history means keeping records of messages, emails, calls, or interactions with a lead.
 
-### 17.2 Authentication Routes
+This is important because sales users need to know what has already been discussed.
 
-```text
-POST /auth/register
-POST /auth/login
-GET /auth/me
-```
+If a different team member handles the same lead later, the history helps them understand the previous communication.
 
-`POST /auth/register` creates a new user if the email is not already registered.
+Communication history prevents confusion and improves professionalism.
 
-`POST /auth/login` checks the email and password, then returns:
+## User Experience Theory
 
-- access token
-- token type
-- user object
+User experience means how easy and comfortable the system is to use.
 
-`GET /auth/me` returns the current authenticated user.
+A CRM system should not feel difficult or confusing. Users should be able to find leads, create tasks, check analytics, and generate emails without unnecessary effort.
 
-### 17.3 Lead Routes
+Good user experience increases adoption. If users enjoy using the system, they are more likely to enter accurate data and follow the process.
 
-```text
-POST /leads
-POST /leads/capture
-POST /leads/import
-GET /leads/import/{job_id}
-GET /leads
-GET /leads/{lead_id}
-PUT /leads/{lead_id}
-DELETE /leads/{lead_id}
-```
+AI CRM is designed around useful screens and clear workflows so that users can complete tasks efficiently.
 
-`POST /leads` creates a manual lead. If no score is supplied, AI scoring runs. If a score is supplied but category is missing, AI scoring is still used to determine the category.
+## Business Logic Theory
 
-`POST /leads/capture` creates a captured lead from landing-page style data. It stores capture details and context in metadata.
+Business logic means the rules that control how the system works.
 
-`GET /leads` supports filters:
+For example, the system may decide how a lead score is calculated, how a lead category is assigned, how tasks are created, and how reports are prepared.
 
-- `status`
-- `category`
-- `score`
-- `min_score`
-- `max_score`
+Business logic is important because it makes sure the system behaves according to the needs of the business.
 
-If `min_score` is greater than `max_score`, the backend returns a bad request error.
+In AI CRM, business logic connects lead management, scoring, tasks, emails, analytics, and automation.
 
-`PUT /leads/{lead_id}` updates lead fields and re-runs assignment.
+## Data Validation Theory
 
-`DELETE /leads/{lead_id}` deletes a lead and returns `204 No Content`.
+Data validation means checking whether entered information is correct and usable.
 
-### 17.4 Task Routes
+For example, an email field should contain a valid email address. Required fields should not be empty.
 
-```text
-POST /tasks
-GET /tasks
-PUT /tasks/{task_id}
-```
+Validation helps keep CRM data clean and reliable.
 
-`POST /tasks` creates a task. If no description is supplied, the backend builds a follow-up description from the lead.
+If invalid data is stored, scoring, reporting, communication, and analytics may become inaccurate.
 
-`GET /tasks` supports optional filters:
+Good validation improves the overall quality of the system.
 
-- `lead_id`
-- `status`
+## Data Organization Theory
 
-`PUT /tasks/{task_id}` updates task fields such as description, due date, and status.
+Data organization means arranging information in a clear and useful way.
 
-### 17.5 Email Routes
+In AI CRM, lead information, task information, email information, and user information are stored separately but connected logically.
 
-```text
-POST /emails/generate
-GET /emails
-GET /emails/track/open/{token}.png
-GET /emails/track/click/{token}
-```
+This helps the system search, filter, analyze, and display information easily.
 
-`POST /emails/generate` generates email copy, creates a tracking token, stores the email, and stores tracking URLs in lead metadata.
+Organized data is important because a CRM system becomes less useful if information is messy or difficult to find.
 
-`GET /emails` lists generated emails. It can filter by `lead_id`.
+## Search and Filter Theory
 
-The open tracking route returns a one-pixel GIF and increments:
+Search and filter features help users find specific information quickly.
 
-- `open_count`
-- `opened_at`
+When a CRM has many leads, users should not need to manually check every record.
 
-The click tracking route requires a `url` query parameter. It increments:
+Filters can help users view leads by status, category, score, source, or other conditions.
 
-- `click_count`
-- `clicked_at`
+Search and filtering save time and help users focus on relevant leads.
 
-Then it redirects to the supplied URL.
+## Sorting Theory
 
-### 17.6 Webhook Routes
+Sorting means arranging records in a specific order.
 
-```text
-POST /webhooks/lead-enrichment
-POST /webhooks/lead-score
-POST /webhooks/generate-email
-POST /webhooks/update-lead
-POST /webhooks/create-task
-```
+For example, leads can be sorted by score, creation date, name, or priority.
 
-These routes support automation workflows such as the JSON workflows included under `backend/workflows/`.
+Sorting helps users understand data better. A sales user may want to see the highest-scoring leads first. A manager may want to see the newest leads first.
 
-`POST /webhooks/lead-enrichment` enriches a lead and stores the result in metadata.
+Sorting improves usability and decision-making.
 
-`POST /webhooks/lead-score` scores a lead, updates score and category, reassigns the owner, and broadcasts a lead score update.
+## Notifications and Timely Action Theory
 
-`POST /webhooks/generate-email` reuses the same logic as `POST /emails/generate`.
+Timely action is very important in sales.
 
-`POST /webhooks/update-lead` allows workflow callbacks to update lead fields and store workflow output in metadata.
+If a lead is interested, the sales team should respond quickly. If the response is delayed, the lead may lose interest.
 
-`POST /webhooks/create-task` creates a task using lead-score priority logic. It assigns:
+The system supports timely action by showing tasks, priorities, real-time updates, and engagement signals.
 
-- high priority and due in 4 hours for score >= 75
-- medium priority and due in 1 day for score >= 45
-- low priority and due in 3 days otherwise
+This helps users act at the right time.
 
-### 17.7 Analytics Route
+## Importance of AI in Sales
 
-```text
-GET /analytics/overview
-```
+AI is useful in sales because sales teams deal with large amounts of information.
 
-This route requires an authenticated user with role `admin`, `manager`, or `sales`.
+AI can help identify patterns, suggest priorities, generate content, and reduce repeated work.
 
-It returns:
+In AI CRM, AI helps with lead scoring, categorization, email generation, and insights.
 
-- funnel data
-- source effectiveness data
-- AI/email metrics
-- sales routing data
+This allows sales users to spend more time building relationships and less time doing repetitive analysis.
 
-The funnel stages are:
+## Human Role in AI CRM
 
-```text
-captured
-new
-contacted
-qualified
-converted
-```
+Even though the system uses AI, human users remain very important.
 
-Source effectiveness includes lead count and average score by source.
+AI can suggest, score, and generate content, but the final decision should still be made by users.
 
-AI accuracy metrics include:
+Sales work depends on human judgment, communication skills, and relationship-building.
 
-- scored leads
-- enriched leads
-- email opens
-- email clicks
+AI CRM supports users instead of replacing them.
 
-Routing metrics count leads by assignee.
+The best result comes when users combine AI suggestions with their own experience.
 
-## 18. Frontend Entry Point
+## Error Handling Theory
 
-The frontend starts from:
+Error handling means managing problems in a controlled way.
 
-```text
-frontend/src/main.jsx
-```
+In any system, errors can happen. A user may enter wrong data, an external service may fail, or a process may not complete properly.
 
-It renders the React application into:
+Good error handling helps the system respond clearly instead of failing silently.
 
-```text
-document.getElementById("root")
-```
+It also helps users understand what went wrong and what can be done next.
 
-The main layout is `AppShell`. It includes:
+Error handling improves reliability.
 
-- sidebar
-- top bar
-- API status indicator
-- refresh button
-- error alert
-- KPI dashboard
-- analytics dashboard
-- lead table
-- lead detail panel
-- authentication and operations panel
-- manual lead form
-- task management panel
-- email composer
+## Reliability Theory
 
-The frontend is a single-page dashboard. It does not use React Router in the current project.
+Reliability means the system should work correctly and consistently.
 
-## 19. Frontend API Client
+A CRM system must be reliable because users depend on it for customer information and sales activities.
 
-API calls are centralized in:
+If the system loses data or gives incorrect results, business work may be affected.
 
-```text
-frontend/src/api/client.js
-```
+AI CRM aims to support reliable lead management, task tracking, communication, and reporting.
 
-The API URL is:
+## Scalability Theory
 
-```javascript
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
-```
+Scalability means the system can handle growth.
 
-The WebSocket URL is derived from the API URL:
+A business may start with a small number of leads but later grow to thousands of leads. The system should be able to support this growth.
 
-```javascript
-export const WS_URL = API_URL.replace(/^http/, "ws");
-```
+Scalability is important for a CRM because sales data increases over time.
 
-The client stores the authentication token in memory and in local storage. The helper function `request()`:
+The project is designed in a way that can be expanded with more features and larger data handling in the future.
 
-1. Builds headers
-2. Adds `Content-Type: application/json` except for `FormData`
-3. Adds the authorization bearer token if available
-4. Calls `fetch`
-5. Handles `204 No Content`
-6. Parses JSON
-7. Throws an error when the response is not successful
+## Maintainability Theory
 
-The exported `api` object contains functions for:
+Maintainability means the system can be updated, improved, and fixed easily.
 
-- login
-- register
-- current user
-- health
-- lead listing
-- lead creation
-- lead update
-- lead deletion
-- AI enrichment
-- AI scoring
-- task listing
-- task creation
-- task update
-- email listing
-- email generation
-- analytics
-- lead import
-- report sending
+A good project should be organized so that new features can be added without damaging existing features.
 
-One important implementation detail is that the frontend's `createTask()` function calls:
+AI CRM has separate responsibilities for user interface, business logic, data storage, AI services, automation, and reporting.
 
-```text
-POST /webhooks/create-task
-```
+This separation helps future maintenance.
 
-instead of:
+## Performance Theory
 
-```text
-POST /tasks
-```
+Performance means how fast and smoothly the system works.
 
-This means frontend-created follow-up tasks use the priority-aware webhook task route.
+A CRM should load data quickly, respond to user actions properly, and show important information without delay.
 
-## 20. Frontend State Management
+Good performance is important because sales users may use the system many times during the day.
 
-Global CRM state is implemented in:
+If the system is slow, users may become frustrated and avoid using it.
 
-```text
-frontend/src/context/CRMContext.jsx
-```
+## Deployment Theory
 
-The context stores:
+Deployment means making the system available for real use.
 
-- API health status
-- leads
-- tasks
-- emails
-- analytics
-- logged-in user
-- selected lead ID
-- loading state
-- error message
+During development, the system is built and tested. During deployment, it is prepared so users can access it through a browser.
 
-The `refresh()` function loads data from:
+Deployment usually includes running the frontend, backend, and database together in a proper environment.
 
-- `/health`
-- `/leads`
-- `/tasks`
-- `/emails`
-- `/analytics/overview`
+A properly deployed CRM can be used by business users for daily work.
 
-Analytics loading is allowed to fail silently because analytics require authentication. If analytics cannot be loaded, the frontend stores `null` and shows a login message in the analytics panel.
+## Testing Theory
 
-The context also:
+Testing means checking whether the system works correctly.
 
-- loads the current user through `/auth/me`
-- opens a WebSocket to `/ws/leads`
-- refreshes data when a WebSocket message arrives
-- exposes action methods to components
+Testing is important because CRM systems handle important business data.
 
-## 21. Frontend Components
+The system should be checked for lead creation, lead update, task management, email generation, authentication, analytics, reporting, and automation.
 
-### 21.1 LeadDashboard
+Testing helps find problems before users face them.
 
-File:
+Good testing improves quality and confidence.
 
-```text
-frontend/src/components/LeadDashboard.jsx
-```
+## Advantages of the Project
 
-This component displays KPI cards:
+The project saves time by reducing manual lead checking.
 
-- Total leads
-- Hot leads
-- Conversion rate
-- Open tasks
+It improves lead organization by storing information in one place.
 
-It calculates these values from frontend state. Hot leads are counted when category is Hot or score is at least 75. Converted leads are counted when status is converted, won, or customer. Open tasks are tasks whose status is not done.
+It helps users focus on important leads through scoring and categorization.
 
-### 21.2 AnalyticsDashboard
+It improves follow-up by allowing task management.
 
-File:
+It improves communication by helping generate personalized email content.
 
-```text
-frontend/src/components/AnalyticsDashboard.jsx
-```
+It gives better visibility through dashboards, analytics, and reports.
 
-This component displays charts using Recharts.
+It improves response time through real-time updates and automation.
 
-It shows:
+It supports better security through authentication and access control.
 
-- Lead conversion funnel
-- Source effectiveness
-- AI accuracy metrics
-- Sales routing
+It helps managers make decisions based on data instead of assumptions.
 
-If analytics are not available, it shows a panel asking the user to log in to view CRM analytics.
+## Limitations of the Project
 
-### 21.3 LeadTable
+The accuracy of AI suggestions depends on the quality of lead data.
 
-File:
+If lead information is incomplete, AI scoring and email generation may not be fully accurate.
 
-```text
-frontend/src/components/LeadTable.jsx
-```
+The system still needs users to review AI-generated content before using it.
 
-This component displays leads in a table-like layout.
+The system requires proper data entry and regular use by the sales team.
 
-It supports:
+If users do not update lead status or task progress, reports may not show the correct picture.
 
-- Text search across name, company, and email
-- Category filter
-- Status filter
-- Sorting by table columns
-- Lead selection
-- AI refresh action
-- Lead deletion
+The system may also depend on external AI services for advanced AI features.
 
-The AI refresh action runs enrichment first and scoring second through the context methods.
+## Risk Analysis
 
-### 21.4 LeadDetail
+One possible risk is poor data quality. If users enter incorrect or incomplete data, the system may produce weak results.
 
-File:
+Another risk is overdependence on AI. Users should treat AI output as support, not as a final decision.
 
-```text
-frontend/src/components/LeadDetail.jsx
-```
+Another risk is missed user adoption. If the sales team does not use the system properly, the CRM will not give full value.
 
-This component displays the selected lead.
+Another risk is security. Since CRM data is sensitive, proper access control is important.
 
-It shows:
+Another risk is integration failure. External automation services must be configured correctly for smooth workflow.
 
-- lead name
-- email
-- company
-- status
-- owner
-- score
-- category
-- created date
-- AI metadata
-- related task timeline
-- related generated email history
+## Future Scope
 
-It also includes a button to refresh AI enrichment and score for the selected lead.
+The project can be improved with more advanced AI features.
 
-### 21.5 LeadForm
+Future versions can include sales forecasting, customer behavior prediction, automatic meeting summaries, smart reminders, and advanced conversation analysis.
 
-File:
+The system can also include more communication channels such as SMS, chat, and voice calling.
 
-```text
-frontend/src/components/LeadForm.jsx
-```
+More detailed analytics can be added to help managers understand sales performance deeply.
 
-This component creates manual leads.
+The system can also support mobile access so users can manage leads from phones and tablets.
 
-The form includes:
+More integrations can be added with marketing tools, payment systems, customer support platforms, and calendar systems.
 
-- name
-- email
-- company
-- source
-- status
-- score
-- category
+The AI model can also be improved to provide better scoring, better email content, and better recommendations.
 
-Frontend validation checks:
+## Social and Business Impact
 
-- name is required
-- email must match a basic email pattern
-- score must be between 0 and 100
+AI CRM can improve the way a business handles customers.
 
-If the score is blank, the backend runs AI scoring.
+It helps businesses respond faster, communicate better, and manage leads more professionally.
 
-### 21.6 AuthPanel
+For small businesses, it can reduce the need for manual tracking and help them compete with larger companies.
 
-File:
+For sales teams, it can reduce workload and improve focus.
 
-```text
-frontend/src/components/AuthPanel.jsx
-```
+For customers, it can improve communication because they receive more relevant and timely responses.
 
-This component handles login and operational actions.
+Overall, the project can improve business productivity and customer relationship quality.
 
-When no user is logged in, it shows:
+## Summary
 
-- email input
-- password input
-- sign-in button
+AI CRM is a smart CRM system designed to manage leads, tasks, emails, analytics, reports, automation, and AI-based sales support.
 
-When a user is logged in, it shows:
+The project solves the problem of manual and unorganized lead management.
 
-- import CSV control
-- send summary button
-- sign-out button
+It helps users store lead data, understand lead quality, plan follow-ups, generate email drafts, track engagement, and review performance.
 
-The component does not currently include a registration form, even though the API client supports registration.
+The use of AI makes the system more useful because it supports scoring, categorization, insights, and communication.
 
-### 21.7 TaskManagement
+The system is helpful for sales teams, managers, business owners, and marketing teams.
 
-File:
+## Conclusion
 
-```text
-frontend/src/components/TaskManagement.jsx
-```
+AI CRM is a complete and intelligent customer relationship management project.
 
-This component lists tasks sorted by lead score priority and due date.
+It combines traditional CRM features with artificial intelligence to make sales work easier, faster, and more organized.
 
-Priority is calculated from the related lead score:
+The project helps businesses manage leads from the first entry stage to follow-up and decision-making.
 
-- score >= 75: high
-- score >= 45: medium
-- otherwise: low
+It improves productivity by reducing manual work, improving lead priority, supporting better communication, and giving useful analytics.
 
-The component allows:
+The system is practical, expandable, and useful for businesses that want a smarter way to manage customer relationships.
 
-- creating a follow-up task for the selected lead
-- marking a task open
-- marking a task done
-
-### 21.8 EmailComposer
-
-File:
-
-```text
-frontend/src/components/EmailComposer.jsx
-```
-
-This component generates and prepares email drafts.
-
-It uses three templates:
-
-- Initial outreach
-- Book demo
-- Nurture follow-up
-
-The order of suggested templates changes according to selected lead score:
-
-- Hot leads prioritize book demo
-- Warm leads prioritize initial outreach
-- Cold leads prioritize nurture follow-up
-
-The generate button calls the backend email generation route. The send button opens a `mailto:` link with the selected lead email, generated subject, and generated body.
-
-## 22. Main Data Flows
-
-### 22.1 Manual Lead Creation Flow
-
-```text
-User fills LeadForm
-  |
-  v
-Frontend validates basic fields
-  |
-  v
-Frontend calls POST /leads
-  |
-  v
-Backend validates LeadCreate schema
-  |
-  v
-If score is blank, backend runs AI or fallback scoring
-  |
-  v
-Backend creates Lead model
-  |
-  v
-Backend flushes to get lead ID
-  |
-  v
-Assignment service assigns owner
-  |
-  v
-Database commit runs
-  |
-  v
-Backend broadcasts lead score update
-  |
-  v
-Frontend refreshes data
-```
-
-### 22.2 Login Flow
-
-```text
-User enters email and password
-  |
-  v
-Frontend calls POST /auth/login
-  |
-  v
-Backend finds active user by email
-  |
-  v
-Backend verifies bcrypt password hash
-  |
-  v
-Backend creates JWT token
-  |
-  v
-Frontend stores token in localStorage
-  |
-  v
-Future requests include Authorization header
-```
-
-### 22.3 AI Refresh Flow
-
-```text
-User clicks AI refresh
-  |
-  v
-Frontend calls POST /webhooks/lead-enrichment
-  |
-  v
-Backend enriches lead and stores metadata
-  |
-  v
-Frontend calls POST /webhooks/lead-score
-  |
-  v
-Backend scores lead, updates category, and assigns owner
-  |
-  v
-Backend broadcasts lead score update
-  |
-  v
-Frontend refreshes data
-```
-
-### 22.4 Email Generation Flow
-
-```text
-User selects lead
-  |
-  v
-User chooses email template
-  |
-  v
-Frontend calls POST /emails/generate
-  |
-  v
-Backend loads lead
-  |
-  v
-Backend generates AI or fallback email
-  |
-  v
-Backend creates tracking token
-  |
-  v
-Backend stores Email row
-  |
-  v
-Backend stores email tracking metadata on lead
-  |
-  v
-Frontend displays subject and body
-  |
-  v
-User clicks Send
-  |
-  v
-Browser opens mailto link
-```
-
-### 22.5 CSV Import Flow
-
-```text
-Logged-in admin or manager selects CSV
-  |
-  v
-Frontend uploads file to POST /leads/import
-  |
-  v
-Backend validates .csv extension
-  |
-  v
-Backend creates in-memory import job
-  |
-  v
-Background task parses CSV
-  |
-  v
-Each valid row is scored, saved, and assigned
-  |
-  v
-Backend broadcasts import completion or failure
-  |
-  v
-Frontend refreshes data after WebSocket message
-```
-
-### 22.6 Analytics Flow
-
-```text
-Frontend calls GET /analytics/overview
-  |
-  v
-Backend verifies JWT token and role
-  |
-  v
-Backend loads leads and emails
-  |
-  v
-Backend calculates funnel, source, AI, and routing metrics
-  |
-  v
-Frontend renders charts with Recharts
-```
-
-## 23. Docker Compose
-
-Docker Compose is configured in:
-
-```text
-docker-compose.yml
-```
-
-It defines three services:
-
-- `postgres`
-- `backend`
-- `frontend`
-
-### 23.1 PostgreSQL Service
-
-The PostgreSQL service uses:
-
-```text
-postgres:16-alpine
-```
-
-It configures:
-
-- database: `ai_crm`
-- user: `postgres`
-- password: `postgres`
-
-It maps:
-
-```text
-5433:5432
-```
-
-It stores database files in the named volume:
-
-```text
-postgres_data
-```
-
-It also includes a health check using `pg_isready`.
-
-### 23.2 Backend Service
-
-The backend builds from:
-
-```text
-./backend
-```
-
-It depends on the PostgreSQL service being healthy.
-
-It exposes:
-
-```text
-8000:8000
-```
-
-It passes AI-related environment variables and `DATABASE_URL`.
-
-It mounts these folders into the container:
-
-- `./backend/app`
-- `./backend/services`
-- `./backend/alembic`
-- `./backend/workflows`
-
-### 23.3 Frontend Service
-
-The frontend builds from:
-
-```text
-./frontend
-```
-
-It depends on the backend service.
-
-It exposes:
-
-```text
-5173:5173
-```
-
-It passes:
-
-```text
-VITE_API_URL
-```
-
-It mounts the frontend source and `index.html`.
-
-## 24. Alembic Migrations
-
-Alembic is configured through:
-
-```text
-backend/alembic.ini
-backend/alembic/
-```
-
-The migration versions included are:
-
-```text
-20260708_0001_initial_crm_schema.py
-20260708_0002_add_lead_metadata.py
-20260708_0003_growth_features.py
-```
-
-Based on the filenames and project structure, these migrations represent:
-
-- initial CRM schema
-- lead metadata additions
-- growth features such as users, assignment, and tracking
-
-The README states that the backend runs Alembic migrations on Docker startup. The current `main.py` also calls `initialize_database()`, which creates tables from models at startup.
-
-## 25. n8n Workflow Files
-
-Workflow files are included under:
-
-```text
-backend/workflows/
-```
-
-The files are:
-
-- `main_lead_processing.workflow.json`
-- `lead_enrichment_subworkflow.workflow.json`
-- `email_personalization_subworkflow.workflow.json`
-- `task_priority_subworkflow.workflow.json`
-- `error_retry_handler.workflow.json`
-
-These workflows are intended to be imported into n8n. They connect external automation flows to CRM webhook endpoints.
-
-The README says to configure:
-
-```text
-CRM_API_BASE_URL
-```
-
-Optional enrichment provider settings are:
-
-```text
-COMPANY_SCRAPE_URL
-DECISION_MAKER_LOOKUP_URL
-```
-
-The backend webhook routes provide the API surface needed for these workflows to enrich leads, score leads, generate email copy, update leads, and create tasks.
-
-## 26. CORS
-
-CORS is configured in `backend/app/main.py`.
-
-The allowed origins come from:
-
-```text
-FRONTEND_ORIGINS
-```
-
-The default value is:
-
-```text
-http://localhost:5173,http://127.0.0.1:5173
-```
-
-This is required because the frontend and backend run on different ports. Without CORS configuration, the browser would block frontend requests to the backend.
-
-## 27. Error Handling
-
-The backend uses FastAPI `HTTPException` for expected error cases.
-
-Important status codes used by the project include:
-
-- `400 Bad Request` for invalid CSV file type or invalid score range filters
-- `401 Unauthorized` for invalid login or token problems
-- `403 Forbidden` for insufficient role permissions
-- `404 Not Found` for missing leads, tasks, or import jobs
-- `409 Conflict` for duplicate users or duplicate lead emails
-- `429 Too Many Requests` for AI rate-limit failures
-- `204 No Content` for successful lead deletion
-
-The frontend API client parses error responses and throws JavaScript errors. The context and components display those errors through the top-level alert.
-
-## 28. Security Concepts
-
-The project includes these security-related features:
-
-- Password hashing with bcrypt
-- JWT access tokens
-- Role-based route protection
-- Email uniqueness for users and leads
-- Pydantic request validation
-- CORS origin configuration
-- Environment variables for secrets and provider keys
-
-Important production considerations still remain:
-
-- Replace the default `JWT_SECRET_KEY`
-- Use HTTPS in deployment
-- Store secrets outside source control
-- Add refresh-token or session-expiration handling if needed
-- Add audit logs for sensitive changes
-- Add stricter upload size validation for CSV imports
-- Add persistent rate limiting if running multiple backend instances
-- Use a real email provider for report delivery and outreach sending
-
-## 29. Current Limitations
-
-The project is functional as a starter AI CRM, but some areas are intentionally simple:
-
-- Import job state is stored only in memory
-- WebSocket connections are stored only in memory
-- AI cache and rate limiter are stored only in memory
-- Reporting email delivery is a placeholder
-- Generated email sending uses `mailto:` instead of a backend email provider
-- Analytics are calculated in Python after loading rows, which may need optimization for large datasets
-- The frontend has login but no visible registration form
-- The frontend is a single-page dashboard without React Router
-- There are no automated test files in the current repository
-- The default local backend database URL expects PostgreSQL on port `5433`
-
-## 30. Strengths of the Project
-
-The project has several strong implementation points:
-
-- Clear separation between frontend and backend
-- FastAPI routes are organized in a single readable API file
-- SQLAlchemy models define clear relationships between leads, tasks, emails, and users
-- Pydantic schemas validate API input and output
-- AI features work even without provider keys through fallback logic
-- Lead assignment is automatic and stored in metadata
-- Email tracking data model and endpoints are implemented
-- CSV import includes validation, duplicate skipping, scoring, and assignment
-- JWT authentication and role-based authorization are implemented
-- Analytics are exposed through a dedicated endpoint and visualized in the frontend
-- WebSockets allow the frontend to refresh after backend updates
-- Docker Compose provides a complete local stack
-- n8n workflow files are included for automation integration
-
-## 31. Recommended Future Improvements
-
-Recommended improvements based on the current project state:
-
-1. Add backend tests for authentication, lead CRUD, scoring fallback, imports, and permissions.
-2. Add frontend tests for forms, table filters, authentication state, and error handling.
-3. Add a visible registration or admin user creation workflow in the frontend.
-4. Persist import jobs in the database instead of memory.
-5. Move AI cache and rate limiting to Redis for multi-instance deployment.
-6. Add pagination to leads, tasks, and emails.
-7. Add search and filter parameters to backend task and email endpoints where useful.
-8. Add a real email provider for report sending and outreach sending.
-9. Add audit logs for lead updates, score changes, imports, and assignment changes.
-10. Add richer user management for admins.
-11. Add deployment-specific documentation for Render and Docker environments.
-12. Add stronger CSV validation, preview, and file size limits.
-13. Add database indexes for common analytics and filtering fields.
-14. Add background job infrastructure for long-running import or AI workflows.
-15. Add production monitoring and structured logs.
-
-## 32. Final Summary
-
-AI CRM is a full-stack CRM application built with React, Vite, FastAPI, SQLAlchemy, PostgreSQL, and optional AI provider integrations.
-
-The backend manages leads, tasks, emails, users, analytics, imports, webhooks, reporting summaries, AI scoring, AI enrichment, email generation, and WebSocket updates.
-
-The frontend presents a single-page CRM command center with KPI cards, analytics charts, lead management, lead details, authentication, CSV import, report triggering, task management, and email drafting.
-
-The AI layer supports OpenAI and Claude when keys are configured. If no provider is available, deterministic fallback logic keeps lead scoring, enrichment, and email generation usable.
-
-The system is suitable as a strong starter CRM project. It already includes the main building blocks of an AI-assisted sales workflow, while leaving clear future paths for production hardening, persistent background jobs, real email delivery, advanced analytics, and automated tests.
+Overall, AI CRM is a valuable project because it connects lead management, AI support, automation, communication, reporting, and security into one organized system.

@@ -3,6 +3,14 @@ export const WS_URL = API_URL.replace(/^http/, "ws");
 
 let authToken = localStorage.getItem("ai_crm_token") || "";
 
+export function getLeadWebSocketUrl() {
+  return `${WS_URL}/ws/leads`;
+}
+
+export function getLeadWebSocketAuthMessage() {
+  return JSON.stringify({ type: "authenticate", token: authToken });
+}
+
 export function setAuthToken(token) {
   authToken = token || "";
   if (authToken) {

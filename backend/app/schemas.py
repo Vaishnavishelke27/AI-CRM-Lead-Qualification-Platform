@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class LeadBase(BaseModel):
@@ -43,11 +43,10 @@ class LeadCaptureRequest(BaseModel):
 
 
 class LeadRead(LeadBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class TaskCreate(BaseModel):
@@ -64,15 +63,13 @@ class TaskUpdate(BaseModel):
 
 
 class TaskRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     lead_id: int
     description: str
     due_date: datetime | None
     status: str
-
-    class Config:
-        from_attributes = True
-
 
 class EmailGenerateRequest(BaseModel):
     lead_id: int = Field(..., gt=0)
@@ -108,6 +105,7 @@ class N8nUpdateLeadRequest(BaseModel):
     category: str | None = Field(default=None, max_length=100)
     company: str | None = Field(default=None, max_length=255)
     source: str | None = Field(default=None, max_length=100)
+    assigned_to: str | None = Field(default=None, max_length=255)
     ai_metadata: dict = Field(default_factory=dict)
     enrichment: dict = Field(default_factory=dict)
     scoring: dict = Field(default_factory=dict)
@@ -132,6 +130,8 @@ class TaskWebhookResponse(BaseModel):
 
 
 class EmailRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     lead_id: int
     subject: str
@@ -143,27 +143,22 @@ class EmailRead(BaseModel):
     open_count: int = 0
     click_count: int = 0
 
-    class Config:
-        from_attributes = True
-
-
 class UserCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     email: EmailStr
     full_name: str = Field(..., min_length=1, max_length=255)
     password: str = Field(..., min_length=8)
-    role: str = Field(default="sales", pattern="^(admin|manager|sales)$")
 
 
 class UserRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     email: EmailStr
     full_name: str
     role: str
     is_active: bool
-
-    class Config:
-        from_attributes = True
-
 
 class LoginRequest(BaseModel):
     email: EmailStr

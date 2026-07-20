@@ -15,8 +15,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("leads", sa.Column("metadata", sa.JSON(), nullable=False, server_default=sa.text("'{}'::json")))
-    op.alter_column("leads", "metadata", server_default=None)
+    op.add_column("leads", sa.Column("metadata", sa.JSON(), nullable=False, server_default=sa.text("'{}'")))
+    if op.get_bind().dialect.name != "sqlite":
+        op.alter_column("leads", "metadata", server_default=None)
 
 
 def downgrade() -> None:

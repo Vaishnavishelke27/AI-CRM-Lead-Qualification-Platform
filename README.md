@@ -22,14 +22,32 @@ CLAUDE_MODEL=claude-3-5-haiku-latest
 AI_CACHE_TTL_SECONDS=300
 AI_RATE_LIMIT_PER_MINUTE=30
 VITE_API_URL=http://localhost:8000
-JWT_SECRET_KEY=change-me-in-production
+JWT_SECRET_KEY=
 JWT_ALGORITHM=HS256
+CRM_WEBHOOK_SECRET=
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
 REPORTING_INTERVAL_MINUTES=1440
 REPORTING_EMAIL_TO=
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_FROM_EMAIL=
+SMTP_STARTTLS=true
 FRONTEND_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 PUBLIC_API_BASE_URL=http://localhost:8000
+EMAIL_CLICK_ALLOWED_HOSTS=localhost,127.0.0.1
 ```
+
+Generate a secret for local or Docker use instead of copying the placeholder value:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Docker Compose will refuse to start when `JWT_SECRET_KEY` is missing, and the backend rejects secrets shorter than 32 characters.
+
+The backend automatically loads the repository-root `.env` file without overriding variables already set in the shell. This applies to both `uvicorn app.main:app` and `alembic upgrade head` when they are run from `backend/`.
 
 ## Run With Docker
 
@@ -49,10 +67,34 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+Local development uses a generated, git-ignored `backend/local_ai_crm.db` through SQLite when `DATABASE_URL` is not set. To use the Docker PostgreSQL instance instead, set:
+
+```bash
+$env:DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5433/ai_crm"
+```
+
+The Docker and Render configurations provide their own PostgreSQL `DATABASE_URL` values and are unaffected by the local SQLite default.
+
 Run migrations locally from `backend/`:
 
 ```bash
 alembic upgrade head
+```
+
+Run backend tests and lint checks:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+ruff check --no-cache .
+```
+
+Optional service smoke tests are enabled by setting dedicated URLs before running `pytest`:
+
+```bash
+TEST_POSTGRES_URL=postgresql://...       # dedicated test database
+DOCKER_BACKEND_URL=http://localhost:8000
+RENDER_BACKEND_URL=https://your-backend.onrender.com
 ```
 
 ## Frontend Local Development
@@ -61,6 +103,14 @@ alembic upgrade head
 cd frontend
 npm install
 npm run dev
+```
+
+Run frontend tests and lint checks:
+
+```bash
+npm test
+npm run lint
+npm run build
 ```
 
 ## API Surface
@@ -100,3 +150,4 @@ Import the JSON files from `backend/workflows/` into n8n:
 - `error_retry_handler.workflow.json`
 
 Set `CRM_API_BASE_URL` in n8n to the backend base URL. Optional enrichment providers can be connected with `COMPANY_SCRAPE_URL` and `DECISION_MAKER_LOOKUP_URL`.
+Set the same strong random `CRM_WEBHOOK_SECRET` value in both the backend and n8n environments; workflow HTTP nodes send it through `X-CRM-Webhook-Secret`.

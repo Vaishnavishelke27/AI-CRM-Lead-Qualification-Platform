@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { api, setAuthToken, WS_URL } from "../api/client";
+import { api, getLeadWebSocketAuthMessage, getLeadWebSocketUrl, setAuthToken } from "../api/client";
 
 const CRMContext = createContext(null);
 
@@ -14,18 +14,26 @@ export function CRMProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (authenticatedUser = user) => {
     setLoading(true);
     setError("");
     try {
-      const [healthResult, leadsResult, tasksResult, emailsResult, analyticsResult] = await Promise.all([
-        api.health().catch(() => ({ status: "offline" })),
+      const healthResult = await api.health().catch(() => ({ status: "offline" }));
+      setHealth(healthResult.status ?? "offline");
+      if (!authenticatedUser) {
+        setLeads([]);
+        setTasks([]);
+        setEmails([]);
+        setAnalytics(null);
+        setSelectedLeadId(null);
+        return;
+      }
+      const [leadsResult, tasksResult, emailsResult, analyticsResult] = await Promise.all([
         api.listLeads(),
         api.listTasks(),
         api.listEmails(),
         api.analytics().catch(() => null),
       ]);
-      setHealth(healthResult.status ?? "offline");
       setLeads(Array.isArray(leadsResult) ? leadsResult : []);
       setTasks(Array.isArray(tasksResult) ? tasksResult : []);
       setEmails(Array.isArray(emailsResult) ? emailsResult : []);
@@ -37,7 +45,7 @@ export function CRMProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     refresh();
@@ -50,10 +58,15 @@ export function CRMProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    const socket = new WebSocket(`${WS_URL}/ws/leads`);
-    socket.onmessage = () => refresh();
+    if (!user) return undefined;
+    const socket = new WebSocket(getLeadWebSocketUrl());
+    socket.onopen = () => socket.send(getLeadWebSocketAuthMessage());
+    socket.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.type !== "authenticated") refresh();
+    };
     return () => socket.close();
-  }, [refresh]);
+  }, [refresh, user]);
 
   const selectedLead = useMemo(
     () => leads.find((lead) => lead.id === selectedLeadId) ?? leads[0] ?? null,
@@ -120,7 +133,7 @@ export function CRMProvider({ children }) {
     const result = await api.login(payload);
     setAuthToken(result.access_token);
     setUser(result.user);
-    await refresh();
+    await refresh(result.user);
     return result.user;
   }, [refresh]);
 
@@ -128,6 +141,10 @@ export function CRMProvider({ children }) {
     setAuthToken("");
     setUser(null);
     setAnalytics(null);
+    setLeads([]);
+    setTasks([]);
+    setEmails([]);
+    setSelectedLeadId(null);
   }, []);
 
   const importLeads = useCallback(

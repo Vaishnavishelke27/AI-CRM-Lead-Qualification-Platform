@@ -7,6 +7,9 @@ class ConnectionManager:
 
     async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()
+        self.register(websocket)
+
+    def register(self, websocket: WebSocket) -> None:
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket) -> None:

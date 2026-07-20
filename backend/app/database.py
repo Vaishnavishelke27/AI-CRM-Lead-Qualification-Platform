@@ -1,11 +1,19 @@
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.config import settings
 
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args, pool_pre_ping=True)
+is_sqlite = settings.database_url.startswith("sqlite")
+is_in_memory_sqlite = settings.database_url in {"sqlite://", "sqlite:///:memory:"}
+connect_args = {"check_same_thread": False} if is_sqlite else {}
+engine_options = {
+    "connect_args": connect_args,
+    "pool_pre_ping": True,
+    **({"poolclass": StaticPool} if is_in_memory_sqlite else {}),
+}
+engine = create_engine(settings.database_url, **engine_options)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

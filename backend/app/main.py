@@ -1,17 +1,20 @@
 import asyncio
 import secrets
-from datetime import datetime, timedelta
+from contextlib import asynccontextmanager, suppress
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, Response, UploadFile, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
-from sqlalchemy.exc import IntegrityError
+from fastapi.responses import JSONResponse, RedirectResponse
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app import models
 from app.config import settings
 from app.database import SessionLocal, get_db, initialize_database
-from app.models import Email, Lead, Task, User
+from app.models import Email, ImportJob, Lead, Task, User
 from app.schemas import (
     AnalyticsResponse,
     BulkImportResponse,
@@ -38,9 +41,9 @@ from app.schemas import (
 )
 from app.services import build_task_description
 from services.assignment_service import assign_lead
-from services.auth_service import create_access_token, get_current_user, hash_password, require_roles, verify_password
+from services.auth_service import authenticate_webhook_or_user, create_access_token, get_current_user, get_user_from_token, hash_password, require_roles, verify_password
 from services.import_service import import_leads_from_csv
-from services.reporting_service import build_summary, send_summary
+from services.reporting_service import build_summary, claim_reporting_run, send_summary
 from services.ai_service import (
     AIRateLimitError,
     enrich_lead_with_ai,
@@ -50,7 +53,35 @@ from services.ai_service import (
 from services.websocket_manager import manager
 
 
-app = FastAPI(title="AI CRM API", version="0.2.0")
+async def scheduled_report_loop(interval_seconds: int):
+    while True:
+        await asyncio.sleep(max(1, interval_seconds))
+        db = SessionLocal()
+        try:
+            if not claim_reporting_run(db, interval_seconds):
+                continue
+            summary = build_summary(db)
+            await send_summary(summary)
+        finally:
+            db.close()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    initialize_database()
+    app.state.reporting_interval_seconds = settings.reporting_interval_minutes * 60
+    app.state.reporting_task = asyncio.create_task(
+        scheduled_report_loop(app.state.reporting_interval_seconds)
+    )
+    try:
+        yield
+    finally:
+        app.state.reporting_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await app.state.reporting_task
+
+
+app = FastAPI(title="AI CRM API", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -59,27 +90,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-IMPORT_JOBS: dict[str, dict] = {}
-
-
-@app.on_event("startup")
-async def start_reporting_scheduler():
-    initialize_database()
-
-    async def scheduled_report_loop():
-        while True:
-            await asyncio.sleep(max(1, app.state.reporting_interval_seconds))
-            db = SessionLocal()
-            try:
-                summary = build_summary(db)
-                await send_summary(summary)
-            finally:
-                db.close()
-
-    app.state.reporting_interval_seconds = settings.reporting_interval_minutes * 60
-    app.state.reporting_task = asyncio.create_task(scheduled_report_loop())
-
 
 def get_lead_or_404(db: Session, lead_id: int) -> Lead:
     lead = db.get(Lead, lead_id)
@@ -133,10 +143,18 @@ def run_ai_operation(operation):
 
 def priority_from_score(score: int) -> tuple[str, datetime]:
     if score >= 75:
-        return "high", datetime.utcnow() + timedelta(hours=4)
+        return "high", datetime.now(timezone.utc) + timedelta(hours=4)
     if score >= 45:
-        return "medium", datetime.utcnow() + timedelta(days=1)
-    return "low", datetime.utcnow() + timedelta(days=3)
+        return "medium", datetime.now(timezone.utc) + timedelta(days=1)
+    return "low", datetime.now(timezone.utc) + timedelta(days=3)
+
+
+def category_from_score(score: int) -> str:
+    if score >= 75:
+        return "Hot"
+    if score >= 45:
+        return "Warm"
+    return "Cold"
 
 
 def task_description_for_priority(lead: Lead, priority: str, context: dict) -> str:
@@ -152,20 +170,33 @@ async def broadcast_lead_score(lead: Lead) -> None:
             "lead_score": lead.lead_score,
             "category": lead.category,
             "assigned_to": lead.assigned_to,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
     )
 
 
 async def process_import_job(job_id: str, csv_text: str) -> None:
-    IMPORT_JOBS[job_id]["status"] = "processing"
     db = SessionLocal()
     try:
+        job = db.get(ImportJob, job_id)
+        if job is None:
+            return
+        job.status = "processing"
+        db.commit()
+
         result = import_leads_from_csv(csv_text, db)
-        IMPORT_JOBS[job_id] = {"status": "completed", "result": result}
+        job.status = "completed"
+        job.result = result
+        job.error = None
+        db.commit()
         await manager.broadcast({"type": "bulk_import_completed", "job_id": job_id, "result": result})
     except Exception as exc:
-        IMPORT_JOBS[job_id] = {"status": "failed", "error": str(exc)}
+        db.rollback()
+        job = db.get(ImportJob, job_id)
+        if job is not None:
+            job.status = "failed"
+            job.error = str(exc)
+            db.commit()
         await manager.broadcast({"type": "bulk_import_failed", "job_id": job_id, "error": str(exc)})
     finally:
         db.close()
@@ -173,12 +204,46 @@ async def process_import_job(job_id: str, csv_text: str) -> None:
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok"}
+    db = SessionLocal()
+    try:
+        db.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"status": "unhealthy", "checks": {"database": "unavailable"}},
+        )
+    finally:
+        db.close()
+
+    return {"status": "ok", "checks": {"database": "ok"}}
 
 
 @app.websocket("/ws/leads")
 async def lead_updates_websocket(websocket: WebSocket):
-    await manager.connect(websocket)
+    await websocket.accept()
+    try:
+        auth_message = await asyncio.wait_for(websocket.receive_json(), timeout=5)
+        if (
+            not isinstance(auth_message, dict)
+            or auth_message.get("type") != "authenticate"
+            or not isinstance(auth_message.get("token"), str)
+        ):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    except (asyncio.TimeoutError, HTTPException, ValueError, WebSocketDisconnect):
+        await websocket.close(code=1008, reason="Authentication required")
+        return
+
+    db = SessionLocal()
+    try:
+        get_user_from_token(auth_message["token"], db)
+    except HTTPException:
+        await websocket.close(code=1008, reason="Authentication required")
+        return
+    finally:
+        db.close()
+
+    manager.register(websocket)
+    await websocket.send_json({"type": "authenticated"})
     try:
         while True:
             await websocket.receive_text()
@@ -194,7 +259,7 @@ def register_user(user: UserCreate, db: Session = Depends(get_db)):
         email=user.email,
         full_name=user.full_name,
         hashed_password=hash_password(user.password),
-        role=user.role,
+        role="sales",
     )
     db.add(db_user)
     db.commit()
@@ -215,7 +280,7 @@ def me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
-@app.post("/leads", response_model=LeadRead, status_code=status.HTTP_201_CREATED)
+@app.post("/leads", response_model=LeadRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(get_current_user)])
 def create_lead(lead: LeadCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     lead_data = lead.model_dump()
     provided_metadata = lead_data.pop("ai_metadata", {}) or {}
@@ -225,9 +290,7 @@ def create_lead(lead: LeadCreate, background_tasks: BackgroundTasks, db: Session
         lead_data["category"] = ai_score["category"]
         provided_metadata = {**provided_metadata, "score": ai_score}
     elif lead_data.get("category") is None:
-        ai_score = run_ai_operation(lambda: score_lead_with_ai({**lead_data, **provided_metadata}))
-        lead_data["category"] = ai_score["category"]
-        provided_metadata = {**provided_metadata, "score": ai_score}
+        lead_data["category"] = category_from_score(lead_data["lead_score"])
 
     db_lead = Lead(**lead_data, ai_metadata=provided_metadata)
     db.add(db_lead)
@@ -268,25 +331,40 @@ async def import_leads_csv(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     current_user: User = Depends(require_roles("admin", "manager")),
+    db: Session = Depends(get_db),
 ):
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CSV file required")
     csv_text = (await file.read()).decode("utf-8-sig")
     job_id = secrets.token_urlsafe(12)
-    IMPORT_JOBS[job_id] = {"status": "queued", "user": current_user.email, "filename": file.filename}
+    job = ImportJob(job_id=job_id, status="queued", user_email=current_user.email, filename=file.filename)
+    db.add(job)
+    db.commit()
     background_tasks.add_task(process_import_job, job_id, csv_text)
-    return {"queued": True, "filename": file.filename, "job_id": job_id, "result": IMPORT_JOBS[job_id]}
+    return {"queued": True, "filename": file.filename, "job_id": job_id, "result": {"status": job.status}}
 
 
 @app.get("/leads/import/{job_id}")
-def get_import_job(job_id: str, current_user: User = Depends(require_roles("admin", "manager"))):
-    job = IMPORT_JOBS.get(job_id)
+def get_import_job(
+    job_id: str,
+    current_user: User = Depends(require_roles("admin", "manager")),
+    db: Session = Depends(get_db),
+):
+    job = db.get(ImportJob, job_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Import job not found")
-    return job
+    return {
+        "job_id": job.job_id,
+        "status": job.status,
+        "filename": job.filename,
+        "result": job.result,
+        "error": job.error,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+    }
 
 
-@app.get("/leads", response_model=list[LeadRead])
+@app.get("/leads", response_model=list[LeadRead], dependencies=[Depends(get_current_user)])
 def list_leads(
     status_filter: str | None = Query(default=None, alias="status"),
     category: str | None = None,
@@ -316,25 +394,26 @@ def list_leads(
     return query.order_by(models.Lead.created_at.desc()).all()
 
 
-@app.get("/leads/{lead_id}", response_model=LeadRead)
+@app.get("/leads/{lead_id}", response_model=LeadRead, dependencies=[Depends(get_current_user)])
 def get_lead(lead_id: int, db: Session = Depends(get_db)):
     return get_lead_or_404(db, lead_id)
 
 
-@app.put("/leads/{lead_id}", response_model=LeadRead)
+@app.put("/leads/{lead_id}", response_model=LeadRead, dependencies=[Depends(get_current_user)])
 def update_lead(lead_id: int, lead_update: LeadUpdate, db: Session = Depends(get_db)):
     lead = get_lead_or_404(db, lead_id)
     update_data = lead_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(lead, field, value)
 
-    assign_lead(lead)
+    if "assigned_to" not in update_data:
+        assign_lead(lead)
     commit_or_conflict(db, "A lead with this email already exists")
     db.refresh(lead)
     return lead
 
 
-@app.delete("/leads/{lead_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/leads/{lead_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(get_current_user)])
 def delete_lead(lead_id: int, db: Session = Depends(get_db)):
     lead = get_lead_or_404(db, lead_id)
     db.delete(lead)
@@ -342,7 +421,7 @@ def delete_lead(lead_id: int, db: Session = Depends(get_db)):
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@app.post("/tasks", response_model=TaskRead, status_code=status.HTTP_201_CREATED)
+@app.post("/tasks", response_model=TaskRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(get_current_user)])
 def create_task(task: TaskCreate, db: Session = Depends(get_db)):
     lead = get_lead_or_404(db, task.lead_id)
     task_data = task.model_dump()
@@ -356,7 +435,7 @@ def create_task(task: TaskCreate, db: Session = Depends(get_db)):
     return db_task
 
 
-@app.get("/tasks", response_model=list[TaskRead])
+@app.get("/tasks", response_model=list[TaskRead], dependencies=[Depends(get_current_user)])
 def list_tasks(
     lead_id: int | None = Query(default=None, gt=0),
     status_filter: str | None = Query(default=None, alias="status"),
@@ -370,7 +449,7 @@ def list_tasks(
     return query.order_by(Task.id.desc()).all()
 
 
-@app.put("/tasks/{task_id}", response_model=TaskRead)
+@app.put("/tasks/{task_id}", response_model=TaskRead, dependencies=[Depends(get_current_user)])
 def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depends(get_db)):
     task = get_task_or_404(db, task_id)
     update_data = task_update.model_dump(exclude_unset=True)
@@ -382,7 +461,7 @@ def update_task(task_id: int, task_update: TaskUpdate, db: Session = Depends(get
     return task
 
 
-@app.post("/emails/generate", response_model=EmailRead, status_code=status.HTTP_201_CREATED)
+@app.post("/emails/generate", response_model=EmailRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(get_current_user)])
 def generate_email(request: EmailGenerateRequest, db: Session = Depends(get_db)):
     lead = get_lead_or_404(db, request.lead_id)
     ai_email = run_ai_operation(
@@ -407,7 +486,7 @@ def generate_email(request: EmailGenerateRequest, db: Session = Depends(get_db))
     return db_email
 
 
-@app.get("/emails", response_model=list[EmailRead])
+@app.get("/emails", response_model=list[EmailRead], dependencies=[Depends(get_current_user)])
 def list_emails(lead_id: int | None = Query(default=None, gt=0), db: Session = Depends(get_db)):
     query = db.query(Email)
     if lead_id is not None:
@@ -415,7 +494,7 @@ def list_emails(lead_id: int | None = Query(default=None, gt=0), db: Session = D
     return query.order_by(Email.id.desc()).all()
 
 
-@app.post("/webhooks/lead-enrichment", response_model=WebhookLeadResponse)
+@app.post("/webhooks/lead-enrichment", response_model=WebhookLeadResponse, dependencies=[Depends(authenticate_webhook_or_user)])
 def webhook_lead_enrichment(request: LeadEnrichmentWebhookRequest, db: Session = Depends(get_db)):
     lead = get_lead_or_404(db, request.lead_id)
     ai_result = run_ai_operation(lambda: enrich_lead_with_ai(lead_to_payload(lead, request.context)))
@@ -425,7 +504,7 @@ def webhook_lead_enrichment(request: LeadEnrichmentWebhookRequest, db: Session =
     return {"lead": lead, "ai_result": ai_result}
 
 
-@app.post("/webhooks/lead-score", response_model=WebhookLeadResponse)
+@app.post("/webhooks/lead-score", response_model=WebhookLeadResponse, dependencies=[Depends(authenticate_webhook_or_user)])
 def webhook_lead_score(request: LeadScoreWebhookRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     lead = get_lead_or_404(db, request.lead_id)
     scoring_context = request.model_dump(exclude={"lead_id"})
@@ -441,12 +520,12 @@ def webhook_lead_score(request: LeadScoreWebhookRequest, background_tasks: Backg
     return {"lead": lead, "ai_result": ai_result}
 
 
-@app.post("/webhooks/generate-email", response_model=EmailRead, status_code=status.HTTP_201_CREATED)
+@app.post("/webhooks/generate-email", response_model=EmailRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(authenticate_webhook_or_user)])
 def webhook_generate_email(request: EmailGenerateRequest, db: Session = Depends(get_db)):
     return generate_email(request, db)
 
 
-@app.post("/webhooks/update-lead", response_model=WebhookLeadResponse)
+@app.post("/webhooks/update-lead", response_model=WebhookLeadResponse, dependencies=[Depends(authenticate_webhook_or_user)])
 def webhook_update_lead(request: N8nUpdateLeadRequest, db: Session = Depends(get_db)):
     lead = get_lead_or_404(db, request.lead_id)
     update_data = request.model_dump(exclude={"lead_id"}, exclude_unset=True)
@@ -471,7 +550,7 @@ def webhook_update_lead(request: N8nUpdateLeadRequest, db: Session = Depends(get
     return {"lead": lead, "ai_result": workflow_payload}
 
 
-@app.post("/webhooks/create-task", response_model=TaskWebhookResponse, status_code=status.HTTP_201_CREATED)
+@app.post("/webhooks/create-task", response_model=TaskWebhookResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(authenticate_webhook_or_user)])
 def webhook_create_task(request: N8nCreateTaskRequest, db: Session = Depends(get_db)):
     lead = get_lead_or_404(db, request.lead_id)
     priority, default_due_date = priority_from_score(lead.lead_score)
@@ -506,7 +585,7 @@ def track_email_open(token: str, db: Session = Depends(get_db)):
     email = db.query(Email).filter(Email.tracking_token == token).first()
     if email:
         email.open_count += 1
-        email.opened_at = datetime.utcnow()
+        email.opened_at = datetime.now(timezone.utc)
         db.commit()
     pixel = b"\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff\x21\xf9\x04\x01\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02\x44\x01\x00\x3b"
     return Response(content=pixel, media_type="image/gif")
@@ -515,10 +594,22 @@ def track_email_open(token: str, db: Session = Depends(get_db)):
 @app.get("/emails/track/click/{token}")
 def track_email_click(token: str, url: str, db: Session = Depends(get_db)):
     email = db.query(Email).filter(Email.tracking_token == token).first()
-    if email:
-        email.click_count += 1
-        email.clicked_at = datetime.utcnow()
-        db.commit()
+    if email is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tracking link not found")
+
+    destination = urlparse(url)
+    if (
+        destination.scheme not in {"http", "https"}
+        or destination.hostname is None
+        or destination.username is not None
+        or destination.password is not None
+        or destination.hostname.lower() not in settings.email_click_allowed_hosts
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Redirect destination is not allowed")
+
+    email.click_count += 1
+    email.clicked_at = datetime.now(timezone.utc)
+    db.commit()
     return RedirectResponse(url=url)
 
 

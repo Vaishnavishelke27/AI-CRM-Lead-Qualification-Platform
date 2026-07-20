@@ -60,6 +60,8 @@
       "parameters": {
         "method": "POST",
         "url": "={{($env.CRM_API_BASE_URL || 'http://backend:8000') + '/webhooks/lead-enrichment'}}",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-CRM-Webhook-Secret", "value": "={{$env.CRM_WEBHOOK_SECRET}}"}]},
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\"lead_id\": $json.lead_id, \"context\": {\"company_data\": $json.company_data || $json, \"decision_makers\": $json.decision_makers || []}}"
