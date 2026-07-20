@@ -60,10 +60,7 @@ services:
     staticPublishPath: dist
     envVars:
       - key: VITE_API_URL
-        fromService:
-          type: web
-          name: ai-crm-backend
-          property: host
+        value: https://ai-crm-backend.onrender.com
 
 databases:
   - name: ai-crm-postgres

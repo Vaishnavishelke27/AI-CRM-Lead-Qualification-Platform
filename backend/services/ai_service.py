@@ -176,6 +176,7 @@ def deterministic_lead_score(lead_data: dict[str, Any]) -> dict[str, Any]:
     return {
         "score": score,
         "category": _category(score),
+        "fallback": True,
         "reasoning": "Deterministic fallback score based on company size, industry, engagement level, and source.",
         "signals": {
             "company_size": company_size or None,
@@ -215,6 +216,7 @@ def enrich_lead_with_ai(lead_data: dict[str, Any]) -> dict[str, Any]:
         return result
 
     return {
+        "fallback": True,
         "enrichment": {
             "industry": lead_data.get("industry"),
             "company_size": lead_data.get("company_size"),
@@ -240,6 +242,7 @@ def generate_personalized_email(lead_data: dict[str, Any], purpose: str, tone: s
     name = lead_data.get("name") or "there"
     company = lead_data.get("company") or "your team"
     return {
+        "fallback": True,
         "subject": f"Next steps for {company}",
         "body": (
             f"Hi {name},\n\n"
